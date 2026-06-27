@@ -9,7 +9,7 @@
   _spread_half_cost -> accounting.acct_spread_cost       （**保留 VRP 的 None/倒挂→0 安全语义**）
 black_scholes_price_usd 是唯一保留的新能力。门判定与 v1.1 等价（tests/test_vrp_gate.py 等价性测试背书）。
 
-边界：只过滤、不判方向、不选期、不进 PLAN_WEIGHTS、不解 ALLOW_TRADING；只跑 EDB 背书侧。
+边界：只过滤、不判方向、不选期、不进 PLAN_WEIGHTS、不打开交易门；只跑 EDB 背书侧。
 """
 from dataclasses import asdict, dataclass
 from math import log, sqrt

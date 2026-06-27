@@ -9,15 +9,14 @@ import position as P
 def _manual_context():
     return {
         "schema_name": "ManualExecutionContext",
-        "schema_version": "nrd.execution.manual_context.v1",
+        "schema_version": "nrd.execution.manual_context.v2",
         "context_id": "manual-1",
         "created_ts_ms": 1000,
         "expires_ts_ms": 31 * 60 * 1000,
         "operator_decision": "APPROVE_PLANNING",
         "direction_bias": "SHORT_CALL",
-        "audit_reference": {"card_id": "BTC #4501", "operator_notes": "approved"},
         "planning_scope": {
-            "dte_hours_min": 24, "dte_hours_max": 72,
+            "target_dte_hours": 24,
             "short_delta_min": 0.15, "short_delta_max": 0.35,
             "protection_width_min": 2000, "protection_width_max": 2500,
             "amount": 0.1,
@@ -88,7 +87,7 @@ def test_build_library_uses_manual_lineage_not_external_lineage():
     snap = lib["recommendations"][0]
     assert lib["manual_context_id"] == "manual-1"
     assert snap["manual_context_id"] == "manual-1"
-    assert snap["audit_card_id"] == "BTC #4501"
+    assert "audit_card_id" not in snap
     assert snap["direction_bias"] == "SHORT_CALL"
     assert "external_package_id" not in snap
     assert "episode_id" not in snap
@@ -100,7 +99,7 @@ def test_manual_context_change_invalidates_quality_code_and_old_confirm_code():
     lib1 = R.build_recommendation_library([_cand()], "s1", ctx, 1, 1000)
     code1 = lib1["recommendations"][0]["confirm_code"]
     changed = _manual_context()
-    changed["audit_reference"] = {"card_id": "BTC #4502", "operator_notes": "changed"}
+    changed["planning_scope"] = dict(changed["planning_scope"], amount=0.2)
     lib2 = R.build_recommendation_library([_cand()], "s1", changed, 2, 1100)
     assert lib2["recommendations"][0]["confirm_code"] != code1
     assert R.resolve_confirm_code(lib2, code1) is None
@@ -132,7 +131,7 @@ def test_position_snapshot_preserves_manual_lineage_only_flag():
         now_ts=1000,
     )
     assert snap["manual_context_id"] == "manual-1"
-    assert snap["audit_card_id"] == "BTC #4501"
+    assert "audit_card_id" not in snap
     assert snap["direction_bias"] == "SHORT_CALL"
     assert snap["approval_id"]
     assert snap["manual_lineage_only"] is True

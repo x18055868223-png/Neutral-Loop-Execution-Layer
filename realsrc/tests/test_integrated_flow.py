@@ -49,11 +49,11 @@ def _handler(*args):
 def _setup():
     fmz_shim.exchange.io_handler = _handler
     import strategy as ST
-    ST.SETTLEMENT_CURRENCY = "BTC"; ST.DIRECTION_BIAS = "SHORT_CALL"; ST.ROUND_MODE = "PLAN"
+    ST.SETTLEMENT_CURRENCY = "BTC"; ST.DIRECTION_BIAS = "SHORT_CALL"
     ST.MENU_SIZE = 6; ST.SHORT_DELTA_RANGE = (0.15, 0.45); ST.PROTECTION_WIDTH_RANGE = (2000, 2500)
-    ST.PLAN_WEIGHTS = {"win_rate": 0.50, "rr": 0.50, "manual": 0.0}
-    ST.SHORT_DTE_HOURS = (24, 72); ST.ORDER_AMOUNT = 0.1; ST.MIN_MARGIN_RELIEF_RATIO = 0.10
-    ST.UNDERLYING_REF_PRICE = None; ST.MIN_SHORT_PREMIUM = 0.0005; ST.MAX_SPREAD_RATIO = 0.60
+    ST.PLAN_WEIGHTS = {"win_rate": 0.35, "rr": 0.25, "efficiency": 0.40, "manual": 0.0}
+    ST.TARGET_DTE_HOURS = 24; ST.ORDER_AMOUNT = 0.1; ST.MIN_MARGIN_RELIEF_RATIO = 0.0
+    ST.UNDERLYING_REF_PRICE = None; ST.MAX_SPREAD_RATIO = 0.60
     ST._LOCKED["detail_id"] = None
     return ST
 

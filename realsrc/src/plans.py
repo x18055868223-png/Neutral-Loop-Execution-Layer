@@ -95,6 +95,12 @@ def plan_credit_on_margin(net_credit_effective, im_with_protection):
     return net_credit_effective / im_with_protection
 
 
+def plan_credit_on_margin_per_24h(credit_on_margin, dte_hours):
+    if credit_on_margin is None or not dte_hours or dte_hours <= 0:
+        return None
+    return credit_on_margin * (24.0 / dte_hours)
+
+
 def plan_preferred_delta(confidence, delta_range):
     """Manual confidence -> preferred short-leg |delta| within the operator range."""
     lo, hi = delta_range
@@ -153,6 +159,7 @@ def plan_assemble(amount, spot, min_ratio,
 
     short_inst = (short or {}).get("instrument_name")
     prot_inst = (prot or {}).get("instrument_name")
+    credit_on_margin = plan_credit_on_margin(eff_credit, (spm or {}).get("im_with_protection"))
     return {
         "id": plan_id(MODE_VERTICAL, short_inst, prot_inst),
         "short_expiry_label": plan_expiry_label(short_inst),
@@ -180,7 +187,9 @@ def plan_assemble(amount, spot, min_ratio,
         "ev": plan_ev(plan_win_rate(short_delta), eff_credit, max_loss),
         "breakeven": plan_breakeven(want_call, (short or {}).get("strike"),
                                     short_mark, prot_mark, spot),
-        "credit_on_margin": plan_credit_on_margin(eff_credit, (spm or {}).get("im_with_protection")),
+        "credit_on_margin": credit_on_margin,
+        "credit_on_margin_per_24h": plan_credit_on_margin_per_24h(
+            credit_on_margin, short_dte_hours),
         "entry_fee": fee, "full_burn": full_burn,
         "spread_cost": acct_spread_cost(sq.get("best_bid"), sq.get("best_ask"), amount),
         "delta_fit": plan_delta_fit(short_delta, preferred_delta),
@@ -198,7 +207,9 @@ def plan_prelim_score(c, weights):
     """无 S:PM 的初筛分（用于枚举后裁剪 top-K）。"""
     wr = c.get("win_rate") or 0.0
     rr = c.get("rr") or 0.0
+    eff = c.get("credit_on_margin_per_24h") or c.get("credit_on_margin") or 0.0
     base = (weights["win_rate"] * wr + weights["rr"] * min(rr, 1.0)
+            + weights.get("efficiency", 0.0) * min(eff, 1.0)
             + weights.get("manual", 0.0) * (c.get("delta_fit") or 0.0))
     return base * (c.get("execution_feasibility_penalty") or 1.0)
 
@@ -208,12 +219,20 @@ def plan_rank(cands, weights, menu_size):
     pool = [c for c in cands if c.get("qualified")] or list(cands)
     rrs = [c["rr"] for c in pool if isinstance(c.get("rr"), (int, float)) and c["rr"] > 0]
     max_rr = max(rrs) if rrs else 1.0
+    effs = [c["credit_on_margin_per_24h"] for c in pool
+            if isinstance(c.get("credit_on_margin_per_24h"), (int, float))
+            and c["credit_on_margin_per_24h"] > 0]
+    max_eff = max(effs) if effs else 1.0
     for c in pool:
         wr = c.get("win_rate") or 0.0
         rr = c.get("rr") or 0.0
         rr_norm = min(rr / max_rr, 1.0) if max_rr else 0.0
+        eff = c.get("credit_on_margin_per_24h") or 0.0
+        eff_norm = min(eff / max_eff, 1.0) if max_eff else 0.0
         c["rr_norm"] = rr_norm
+        c["efficiency_norm"] = eff_norm
         base = (weights["win_rate"] * wr + weights["rr"] * rr_norm
+                + weights.get("efficiency", 0.0) * eff_norm
                 + weights.get("manual", 0.0) * (c.get("delta_fit") or 0.0))
         c["surface_composite"] = base
         c["composite"] = base * (c.get("execution_feasibility_penalty") or 1.0)
@@ -237,4 +256,7 @@ def _assign_tags(menu):
     ev_c = [c for c in menu if isinstance(c.get("ev"), (int, float))]
     if ev_c:
         max(ev_c, key=lambda c: c["ev"])["tags"].append("高期望")
+    eff_c = [c for c in menu if isinstance(c.get("credit_on_margin_per_24h"), (int, float))]
+    if eff_c:
+        max(eff_c, key=lambda c: c["credit_on_margin_per_24h"])["tags"].append("资金效率")
     max(menu, key=lambda c: c.get("composite") or 0.0)["tags"].append("均衡")

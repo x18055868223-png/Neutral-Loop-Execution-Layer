@@ -4,19 +4,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import recommend as R
 
 
-def _manual_context(card_id="BTC #4501", amount=0.1, delta_max=0.35,
-                    expires_ts_ms=31 * 60 * 1000, note="approved"):
+def _manual_context(direction="SHORT_CALL", amount=0.1, delta_max=0.35,
+                    expires_ts_ms=31 * 60 * 1000, target_dte=24):
     return {
         "schema_name": "ManualExecutionContext",
-        "schema_version": "nrd.execution.manual_context.v1",
+        "schema_version": "nrd.execution.manual_context.v2",
         "context_id": "manual-1",
         "created_ts_ms": 1000,
         "expires_ts_ms": expires_ts_ms,
         "operator_decision": "APPROVE_PLANNING",
-        "direction_bias": "SHORT_CALL",
-        "audit_reference": {"card_id": card_id, "operator_notes": note},
+        "direction_bias": direction,
         "planning_scope": {
-            "dte_hours_min": 24, "dte_hours_max": 72,
+            "target_dte_hours": target_dte,
             "short_delta_min": 0.15, "short_delta_max": delta_max,
             "protection_width_min": 2000, "protection_width_max": 2500,
             "amount": amount,
@@ -55,11 +54,12 @@ def test_strategy_code_and_side():
 def test_manual_context_hash_uses_only_material_manual_fields():
     ctx = _manual_context()
     h1 = R.manual_context_hash(ctx)
-    ignored = _manual_context(note="different operator note")
+    ignored = _manual_context()
     ignored["created_ts_ms"] = 2000
     assert R.manual_context_hash(ignored) == h1
     assert R.manual_context_hash(_manual_context(delta_max=0.45)) != h1
-    assert R.manual_context_hash(_manual_context(card_id="BTC #4502")) != h1
+    assert R.manual_context_hash(_manual_context(direction="SHORT_PUT")) != h1
+    assert R.manual_context_hash(_manual_context(amount=0.2)) != h1
     assert R.manual_context_hash(_manual_context(expires_ts_ms=32 * 60 * 1000)) != h1
 
 
@@ -80,8 +80,8 @@ def test_build_library_unique_confirm_codes_and_manual_lineage():
     assert snap["approval_id"]
     assert snap["manual_context_id"] == "manual-1"
     assert snap["manual_context_hash"] == lib["manual_context_hash"]
-    assert snap["audit_card_id"] == "BTC #4501"
-    assert snap["operator_note"] == "approved"
+    assert "audit_card_id" not in snap
+    assert "operator_note" not in snap
     assert snap["direction_bias"] == "SHORT_CALL"
     assert snap["config_hash"]
     assert "external_package_id" not in snap
@@ -106,7 +106,7 @@ def test_confirm_code_stable_under_subbucket_drift_but_changes_on_material_drift
     assert lib_same["recommendations"][0]["confirm_code"] == code1
 
     lib2 = R.build_recommendation_library(
-        [_cand(relief=0.83)], "s1", _manual_context(card_id="BTC #4502"), 3, 1200)
+        [_cand(relief=0.83)], "s1", _manual_context(amount=0.2), 3, 1200)
     code2 = lib2["recommendations"][0]["confirm_code"]
     assert code2 != code1
     assert R.resolve_confirm_code(lib2, code1) is None
@@ -126,8 +126,8 @@ def test_precommit_recheck_pass_and_fail():
 
 
 def test_manual_context_change_changes_quality_code():
-    lib1 = R.build_recommendation_library([_cand()], "s1", _manual_context(card_id="BTC #4501"), 1, 1000)
-    lib2 = R.build_recommendation_library([_cand()], "s1", _manual_context(card_id="BTC #4502"), 1, 1000)
+    lib1 = R.build_recommendation_library([_cand()], "s1", _manual_context(amount=0.1), 1, 1000)
+    lib2 = R.build_recommendation_library([_cand()], "s1", _manual_context(amount=0.2), 1, 1000)
     assert lib1["recommendations"][0]["quality_code"] != lib2["recommendations"][0]["quality_code"]
 
 

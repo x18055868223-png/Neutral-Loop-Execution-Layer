@@ -9,9 +9,8 @@ def _manual_context():
         "context_id": "manual-1",
         "expires_ts_ms": 31 * 60 * 1000,
         "direction_bias": "SHORT_CALL",
-        "audit_reference": {"card_id": "BTC #4501", "operator_notes": "approved"},
         "planning_scope": {
-            "dte_hours_min": 24, "dte_hours_max": 72,
+            "target_dte_hours": 24,
             "short_delta_min": 0.15, "short_delta_max": 0.35,
             "protection_width_min": 2000, "protection_width_max": 2500,
             "amount": 0.1,

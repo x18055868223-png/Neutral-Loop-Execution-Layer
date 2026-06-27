@@ -9,13 +9,10 @@ import fmz_shim
 def _setup_manual():
     ST = RC._setup()
     ST.MANUAL_PLANNING_ALLOWED = False
-    ST.MANUAL_AUDIT_CARD_ID = ""
-    ST.MANUAL_AUDIT_NOTE = ""
-    ST.MANUAL_CONTEXT_TTL_MIN = 30
     ST.DIRECTION_BIAS = "SHORT_CALL"
     ST.SHORT_DELTA_RANGE = (0.15, 0.35)
     ST.PROTECTION_WIDTH_RANGE = (2000, 2500)
-    ST.SHORT_DTE_HOURS = (24, 72)
+    ST.TARGET_DTE_HOURS = 24
     ST.ORDER_AMOUNT = 0.1
     return ST
 
@@ -36,27 +33,25 @@ def test_planning_disabled_waits_for_manual_gate_without_external_receiver():
 def test_invalid_manual_context_reports_invalid_without_building_menu():
     ST = _setup_manual()
     ST.MANUAL_PLANNING_ALLOWED = True
-    ST.MANUAL_AUDIT_CARD_ID = ""
+    ST.DIRECTION_BIAS = "BAD"
     ST.receive_external = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("external path called"))
     ctx = ST.run_cycle(now_ms=RC._BASE["t"] or 1000)
     assert ctx["console_phase"] == "MANUAL_CONTEXT_INVALID"
-    assert "AUDIT_REFERENCE_MISSING" in (ctx.get("manual_context_errors") or [])
+    assert "DIRECTION_BIAS_INVALID" in (ctx.get("manual_context_errors") or [])
     assert not ctx.get("pending_candidates")
 
 
 def test_valid_manual_context_builds_display_menu_but_not_lockable_without_vrp_context():
     ST = _setup_manual()
     ST.MANUAL_PLANNING_ALLOWED = True
-    ST.MANUAL_AUDIT_CARD_ID = "BTC #4501"
-    ST.MANUAL_AUDIT_NOTE = "manual approved planning"
     ST.receive_external = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("external path called"))
 
     ctx = ST.run_cycle()
 
     assert ctx["console_phase"] == "PLAN_MENU_READY"
-    assert ctx.get("manual_context", {}).get("audit_reference", {}).get("card_id") == "BTC #4501"
+    assert "audit_reference" not in ctx.get("manual_context", {})
     assert ctx.get("display_candidates_count", 0) > 0
     assert ctx.get("lockable_candidates_count") == 0
     assert ctx.get("not_lockable_reason") == "VRP_CONTEXT_MISSING"
@@ -70,7 +65,6 @@ def test_existing_position_manages_without_external_layer():
     fmz_shim._G(ST._POSITION_KEY, {
         "position_id": "pos-manual",
         "manual_context_id": "manual-1",
-        "audit_card_id": "BTC #4501",
         "side": "CALL",
         "short_instrument": "BTC-S-76000-C",
         "long_instrument": "BTC-S-78000-C",

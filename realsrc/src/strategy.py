@@ -161,6 +161,8 @@ def _execution_feasibility_cfg():
             "max_protection_spread": MAX_SPREAD_RATIO,
             "protection_low_premium_max": PROTECTION_LOW_PREMIUM_MAX,
             "protection_abs_spread_max": PROTECTION_ABS_SPREAD_MAX,
+            "min_retention": 0.25,
+            "retention_bad": 0.25,
             "min_net_credit": ENTRY_MIN_NET_CREDIT}
 
 
@@ -193,8 +195,7 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
         manual_context = {"direction_bias": manual_context}
     manual_context = manual_context or {}
     scope = manual_context.get("planning_scope") or {}
-    dte_min = scope.get("dte_hours_min", SHORT_DTE_HOURS[0])
-    dte_max = scope.get("dte_hours_max", SHORT_DTE_HOURS[1])
+    target_dte = scope.get("target_dte_hours", TARGET_DTE_HOURS)
     dmin = scope.get("short_delta_min", SHORT_DELTA_RANGE[0])
     dmax = scope.get("short_delta_max", SHORT_DELTA_RANGE[1])
     width_range = (scope.get("protection_width_min", PROTECTION_WIDTH_RANGE[0]),
@@ -208,10 +209,12 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
     instruments = dbt_get_instruments(SETTLEMENT_CURRENCY, "option")
     if not instruments:
         return [], False, None, "NO_INSTRUMENTS", diag
-    short_exps = legsel_expiries_in_band(instruments, dte_min, dte_max,
-                                         now_ms, want_call)
+    short_exps = legsel_target_expiries(instruments, target_dte, now_ms, want_call)
     if not short_exps:
-        return [], False, None, "NO_SHORT_EXPIRY_IN_BAND", diag
+        return [], False, None, "NO_TARGET_EXPIRY", diag
+    expiry_roles = {}
+    for i, exp in enumerate(short_exps.keys()):
+        expiry_roles[exp] = "TARGET_24H" if i == 0 else "NEXT_EXPIRY"
     pm_ok, model = spm_account_is_portfolio_margin(dbt_account_summary(SETTLEMENT_CURRENCY))
     pref = (dmin + dmax) / 2.0
 
@@ -227,9 +230,8 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
             if not sq or sq.get("best_bid") in (None, 0) or sq.get("mark") is None:
                 diag["无报价/无买盘"] += 1
                 continue
-            if sq["mark"] < MIN_SHORT_PREMIUM:
+            if sq["mark"] < THIN_SHORT_PREMIUM_WARN:
                 diag["权利金过薄"] += 1
-                continue
             ssr = exec_spread_ratio(sq)
             if ssr is not None and ssr > MAX_SPREAD_RATIO:
                 diag["价差过宽"] += 1
@@ -248,6 +250,7 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
             c = plan_assemble(amount, spot, MIN_MARGIN_RELIEF_RATIO, pref,
                               want_call, short, sq, vprot, pq,
                               None, pm_ok, model, s_dte_h, s_dte_h)
+            c["expiry_role"] = expiry_roles.get(s_exp)
             _attach_execution_feasibility(c, sq, pq)
             if (c.get("execution_feasibility") or {}).get("hard_gate_passed") is False:
                 diag["执行不可行"] += 1
@@ -271,6 +274,7 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
             amount, spot, MIN_MARGIN_RELIEF_RATIO, pref,
             want_call, re["short"], re["sq"], re["prot"], re["pq"], spm, pm_ok, model,
             re["s_dte"], re["p_dte"])
+        plan["expiry_role"] = expiry_roles.get(plan.get("short_expiry"))
         plan = _attach_execution_feasibility(plan, re["sq"], re["pq"])
         if (plan.get("execution_feasibility") or {}).get("hard_gate_passed") is False:
             diag["执行不可行"] += 1
@@ -295,15 +299,15 @@ def _ctx_base(state, spot, reason=None):
             profile, DRY_RUN_PASSED, ALLOW_ENTRY_TRADING, ALLOW_EXIT_TRADING,
             RISK_EXIT_MAX_SPEND),
         "currency": SETTLEMENT_CURRENCY,
-        "direction_bias": DIRECTION_BIAS, "allow_trading": ALLOW_TRADING,
+        "direction_bias": DIRECTION_BIAS,
         "manual_gate_state": ("PLANNING_ALLOWED" if MANUAL_PLANNING_ALLOWED
                               else "WAIT_MANUAL_AUDIT_GATE"),
-        "manual_context_ttl_min": MANUAL_CONTEXT_TTL_MIN,
-        "round_mode": ROUND_MODE,
+        "target_dte_hours": TARGET_DTE_HOURS,
+        "approval_ttl_ms": APPROVAL_TTL_MS,
         "state": state,
         "max_chase_steps": MAX_CHASE_STEPS, "min_required_ratio": MIN_MARGIN_RELIEF_RATIO,
         "reason": reason, "spot": spot, "amount": ORDER_AMOUNT,
-        "selected_plan": SELECTED_PLAN, "protection_mode": None,
+        "selected_plan": None, "protection_mode": None,
     }
     return snap
 
@@ -334,7 +338,9 @@ def _flat_plan_fields(p):
         short_expiry_label=p.get("short_expiry_label"),
         protection_expiry_label=p.get("protection_expiry_label"),
         protection_dte_hours=p.get("protection_dte_hours"),
+        expiry_role=p.get("expiry_role"),
         breakeven=p.get("breakeven"), credit_on_margin=p.get("credit_on_margin"),
+        credit_on_margin_per_24h=p.get("credit_on_margin_per_24h"),
         execution_feasibility_grade=p.get("execution_feasibility_grade"),
         execution_feasibility_score=p.get("execution_feasibility_score"),
         execution_feasibility_score_norm=p.get("execution_feasibility_score_norm"),
@@ -364,7 +370,7 @@ def integrated_plan_preview(spot, market_context=None, portfolio_state=None):
 
     main() 在拿到实时 IV/RV(market_context) 与组合状态后调用本函数；选中方案的会话锁定/授权
     plan_hash + TTL 与 FMZ 命令栏交互由人工审计门主链接管。
-    边界：VRP/预算**只过滤**，不进 PLAN_WEIGHTS、不判方向、不解 ALLOW_TRADING。"""
+    边界：VRP/预算**只过滤**，不进 PLAN_WEIGHTS、不判方向、不打开交易门。"""
     now_ms = _now_ms()
     menu, pm_ok, model, reason, diag = _build_menu(now_ms, spot)
     out = {"reason": reason, "menu": menu, "enum_diag": diag, "pm_ok": pm_ok,
@@ -483,9 +489,8 @@ def _manual_risk_policy():
 
 def _manual_context_signature():
     return manual_config_signature(
-        MANUAL_PLANNING_ALLOWED, DIRECTION_BIAS, SHORT_DTE_HOURS, SHORT_DELTA_RANGE,
-        PROTECTION_WIDTH_RANGE, ORDER_AMOUNT, MANUAL_AUDIT_CARD_ID,
-        MANUAL_AUDIT_NOTE, MANUAL_CONTEXT_TTL_MIN, _manual_risk_policy())
+        MANUAL_PLANNING_ALLOWED, DIRECTION_BIAS, TARGET_DTE_HOURS, SHORT_DELTA_RANGE,
+        PROTECTION_WIDTH_RANGE, ORDER_AMOUNT, APPROVAL_TTL_MS, _manual_risk_policy())
 
 
 def _refresh_vrp_context(ctx, now_ms):
@@ -511,12 +516,12 @@ def _manual_context_for_cycle(now_ms):
         return None
     sig = _manual_context_signature()
     ctx = _G(_MANUAL_CONTEXT_KEY)
-    if not ctx or ctx.get("config_signature") != sig:
+    if (not ctx or ctx.get("config_signature") != sig
+            or (ctx.get("expires_ts_ms") is not None and ctx.get("expires_ts_ms") <= now_ms)):
         ctx = build_manual_context(
-            now_ms, MANUAL_PLANNING_ALLOWED, DIRECTION_BIAS, SHORT_DTE_HOURS,
+            now_ms, MANUAL_PLANNING_ALLOWED, DIRECTION_BIAS, TARGET_DTE_HOURS,
             SHORT_DELTA_RANGE, PROTECTION_WIDTH_RANGE, ORDER_AMOUNT,
-            MANUAL_AUDIT_CARD_ID, MANUAL_AUDIT_NOTE, MANUAL_CONTEXT_TTL_MIN,
-            _manual_risk_policy())
+            APPROVAL_TTL_MS, _manual_risk_policy())
         _G(_MANUAL_CONTEXT_KEY, ctx)
     ctx = _refresh_vrp_context(ctx, now_ms)
     _G(_MANUAL_CONTEXT_KEY, ctx)
@@ -873,8 +878,6 @@ def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
         "session_id": locked.get("session_id"),
         "manual_context_id": locked.get("manual_context_id"),
         "manual_context_hash": locked.get("manual_context_hash"),
-        "audit_card_id": locked.get("audit_card_id"),
-        "operator_note": locked.get("operator_note"),
         "direction_bias": locked.get("direction_bias"),
         "approval_id": locked.get("approval_id"),
         "strategy_code": locked.get("strategy_code"),

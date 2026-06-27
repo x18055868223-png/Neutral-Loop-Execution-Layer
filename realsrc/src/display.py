@@ -59,9 +59,9 @@ def disp_manual_gate_state_cn(s):
 def disp_manual_hint(manual_gate_state):
     """按人工审计门状态给操作指引，降低认知负荷。"""
     if manual_gate_state == "PLANNING_ALLOWED":
-        return "按 DIRECTION_BIAS、到期、delta、腿宽和审计卡引用生成候选"
+        return "按 DIRECTION_BIAS、24h目标到期、delta、腿宽和数量生成候选"
     if manual_gate_state == "WAIT_MANUAL_AUDIT_GATE":
-        return "填写 MANUAL_AUDIT_CARD_ID 并开启 MANUAL_PLANNING_ALLOWED 后再生成候选"
+        return "开启 MANUAL_PLANNING_ALLOWED 后生成候选"
     if manual_gate_state == "MANUAL_CONTEXT_INVALID":
         return "人工审计参数无效或过期，需修正后重建候选"
     return "—"
@@ -207,13 +207,13 @@ def _overview_table(ctx):
         "type": "table", "title": "运行概览",
         "cols": ["项目", "值"],
         "rows": [
-            ["版本 / 轮次", "v%s ｜ %s" % (g("version") or "?",
-                "计划轮(PLAN)" if g("round_mode") == "PLAN" else "下单轮(ORDER)")],
+            ["版本 / 主链", "v%s ｜ 完整主链" % (g("version") or "?")],
             ["RUN_PROFILE", profile_line],
             ["标的 / 结算币", g("currency")],
-            ["人工审计门 / TTL", "%s / %s" % (disp_manual_gate_state_cn(g("manual_gate_state")), g("manual_context_ttl_min"))],
+            ["目标DTE / 审批TTL", "%sh / %s分" % (g("target_dte_hours"), int((g("approval_ttl_ms") or 0) / 60000))],
+            ["人工审计门", disp_manual_gate_state_cn(g("manual_gate_state"))],
             ["方向", BIAS_CN.get(g("direction_bias"), g("direction_bias"))],
-            ["选用方案号(下单轮)", g("selected_plan")],
+            ["当前锁定/选用方案", g("selected_plan") or "—"],
             ["选用方案保护模式", g("protection_mode_cn") or "—"],
             ["执行门控", disp_gate_line(g("gate_summary"))],
             ["状态机", disp_state_cn(g("state"))],
@@ -249,25 +249,27 @@ def disp_menu_table(menu, selected_no, spot):
         g = p.get
         star = "★" if g("id") == selected_no else ""
         qihao = "%s(同)" % g("short_expiry_label")
+        role = {"TARGET_24H": "近24h", "NEXT_EXPIRY": "次日备选"}.get(g("expiry_role"), "—")
         tags = "/".join(g("tags") or []) or "—"
         ok = "合格" if g("qualified") else ("✗" + (g("reject_reason") or ""))
         if g("qualified") and g("execution_feasibility_grade"):
             ok = "%s/%s" % (ok, g("execution_feasibility_grade"))
         dte = ("%.1fd" % (g("short_dte_hours") / 24.0)) if g("short_dte_hours") else "—"
         rows.append([
-            "%s%s" % (star, g("id")), tags, g("mode_cn") or "—", qihao, dte,
+            "%s%s" % (star, g("id")), tags, role, g("mode_cn") or "—", qihao, dte,
             "%s(Δ%s)" % (_num(g("short_strike")), _num(g("short_delta"))),
             _num(g("protection_strike")), _num(g("width")),
             _dist_pct(g("short_strike"), spot), pct(g("win_rate")),
             _usd0(g("net_credit_effective"), spot), pct(g("credit_on_margin")),
+            pct(g("credit_on_margin_per_24h")),
             f2(g("rr")), _num(g("breakeven"), small=2, big=2),
             pct(g("margin_relief_ratio")), ok,
         ])
     return {
         "type": "table",
-        "title": "策略选择明细（★=当前选中；按【编号】匹配；有效$=净 credit；信用/保证金=周期保证金回报）",
-        "cols": ["编号", "推荐", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
-                 "腿宽", "短距现价", "胜率", "有效$", "信用/保证金", "盈亏比", "盈亏平衡价",
+        "title": "策略选择明细（★=当前选中；有效$=净 credit；24h效率=按资金占用时间折算）",
+        "cols": ["编号", "推荐", "期号角色", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
+                 "腿宽", "短距现价", "胜率", "有效$", "信用/保证金", "24h效率", "盈亏比", "盈亏平衡价",
                  "释放", "合格"],
         "rows": rows,
     }
@@ -283,6 +285,7 @@ def _position_table(ctx):
                 and ratio >= minr)
     ml_label = "最大亏损(硬封顶)" if mode == 2 else "最大亏损≈(非硬封顶)"
     cm = g("credit_on_margin")
+    cm24 = g("credit_on_margin_per_24h")
     rows = [
         ["合约(短/保护)", g("short_instrument") or "—", g("protection_instrument") or "—"],
         ["仅卖方腿 IM (B)", _num(g("im_short_only")), _usd(g("im_short_only"), spot)],
@@ -304,6 +307,7 @@ def _position_table(ctx):
         [ml_label, _num(g("max_loss")), _usd(g("max_loss"), spot)],
         ["盈亏比 / 信用占保证金", ("%.2f" % g("rr")) if isinstance(g("rr"), (int, float)) else "—",
          ("%.1f%%" % (cm * 100)) if isinstance(cm, (int, float)) else "—"],
+        ["24h资金效率", ("%.1f%%" % (cm24 * 100)) if isinstance(cm24, (int, float)) else "—", "按DTE折算"],
         ["到期盈亏平衡价(近似)", _num(g("breakeven"), small=2, big=2), "—"],
         ["预估开仓手续费", _num(g("estimated_entry_fee")), _usd(g("estimated_entry_fee"), spot)],
     ]
@@ -321,7 +325,7 @@ def _position_table(ctx):
 
 
 def disp_order_intent_table(intent):
-    """『将下达订单』意图表：翻 ALLOW_TRADING 前一眼核对实际下单。"""
+    """『将下达订单』意图表：真实下单前核对实际订单。"""
     rows = []
     for it in intent or []:
         prices = "/".join(_num(p) for p in (it.get("prices") or [])) or "—"
@@ -364,7 +368,7 @@ _PHASE_CN = {
 # 操作提示引擎：阶段 → 「下一步点哪个按钮、输什么」的人话提示（落实「在交互栏给出操作提示」）
 _HINTS = {
     "WAIT_MANUAL_AUDIT_GATE": "等待可交易人工审计；人工审计不可用/过期时禁新开仓，持仓管理继续",
-    "MANUAL_GATE": "人工审计门模式：进场依据 MANUAL_PLANNING_ALLOWED、DIRECTION_BIAS 与 MANUAL_AUDIT_* 参数",
+    "MANUAL_GATE": "人工审计门模式：进场依据 MANUAL_PLANNING_ALLOWED、DIRECTION_BIAS、数量与风险参数",
     "RECOMMEND_READY": "待批方案：点【执行】输入方案确认码进场 ｜ 点【拒绝】放弃",
     "HARD_APPROVAL_WAIT": "待批方案：点【执行】输入方案确认码进场 ｜ 点【拒绝】放弃",
     "PLAN_LOCKED": "方案已锁定·预提交复核中；复核通过且进场门开启才真实下单",

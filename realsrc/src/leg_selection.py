@@ -55,6 +55,30 @@ def legsel_expiries_in_band(instruments, dte_min_h, dte_max_h, now_ms, want_call
     return by_exp
 
 
+def legsel_target_expiries(instruments, target_dte_h, now_ms, want_call, max_expiries=2):
+    """Return {expiry_ts: instruments} for nearest target DTE plus next later expiry."""
+    by_exp = {}
+    for inst in instruments:
+        if not _opt_type_match(inst, want_call):
+            continue
+        exp = inst.get("expiration_timestamp")
+        if exp is None:
+            continue
+        if legsel_dte_hours(exp, now_ms) <= 0:
+            continue
+        by_exp.setdefault(exp, []).append(inst)
+    if not by_exp:
+        return {}
+    ordered = sorted(by_exp)
+    nearest = min(ordered, key=lambda e: abs(legsel_dte_hours(e, now_ms) - target_dte_h))
+    chosen = [nearest]
+    for exp in ordered:
+        if exp > nearest:
+            chosen.append(exp)
+            break
+    return {exp: by_exp[exp] for exp in chosen[:max_expiries]}
+
+
 def _otm_side_ok(strike, spot, want_call):
     """call 卖在现价上方、put 卖在现价下方（OTM 侧）。"""
     return strike > spot if want_call else strike < spot

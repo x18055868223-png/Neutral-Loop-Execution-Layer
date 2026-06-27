@@ -124,12 +124,12 @@ def test_gex_context_is_material_lineage():
         import urllib.request
         urllib.request.urlopen = old
 
-    ctx1 = b.build_manual_context(1000, True, "SHORT_CALL", (24, 72), (0.15, 0.45),
-                                  (2000, 2500), 0.1, "", "", 30, {},
+    ctx1 = b.build_manual_context(1000, True, "SHORT_CALL", 24, (0.15, 0.45),
+                                  (2000, 2500), 0.1, 30 * 60 * 1000, {},
                                   market_context=v1["market_context"],
                                   vrp_context_status=v1["status"])
-    ctx2 = b.build_manual_context(1000, True, "SHORT_CALL", (24, 72), (0.15, 0.45),
-                                  (2000, 2500), 0.1, "", "", 30, {},
+    ctx2 = b.build_manual_context(1000, True, "SHORT_CALL", 24, (0.15, 0.45),
+                                  (2000, 2500), 0.1, 30 * 60 * 1000, {},
                                   market_context=v2["market_context"],
                                   vrp_context_status=v2["status"])
 
@@ -217,8 +217,8 @@ def test_plan_locked_display_uses_locked_plan_not_first_frozen_candidate():
     fmz_shim._STORE.clear()
     now = 1000
     manual_context = b.build_manual_context(
-        now, True, "SHORT_PUT", (24, 72), (0.15, 0.45), (2000, 2500),
-        0.1, "", "", 30, {}, market_context={"source": "GEX_MONITOR_IV_RV_RANK"},
+        now, True, "SHORT_PUT", 24, (0.15, 0.45), (2000, 2500),
+        0.1, 30 * 60 * 1000, {}, market_context={"source": "GEX_MONITOR_IV_RV_RANK"},
         vrp_context_status="VRP_CONTEXT_VALID")
     first = _display_plan(1111, "BTC-29JUN26-60000-P", "BTC-29JUN26-57500-P", 60000, 57500)
     locked_plan = _display_plan(2222, "BTC-29JUN26-59500-P", "BTC-29JUN26-57000-P", 59500, 57000)

@@ -52,27 +52,6 @@ def _range(scope, min_key, max_key, range_key=None):
     return [scope.get(min_key), scope.get(max_key)]
 
 
-def _audit_reference(manual_context):
-    ref = (manual_context or {}).get("audit_reference") or {}
-    if not isinstance(ref, dict):
-        return {}
-    return ref
-
-
-def _audit_card_id(manual_context):
-    ref = _audit_reference(manual_context)
-    return (ref.get("card_id") or ref.get("audit_card_id")
-            or (manual_context or {}).get("audit_card_id"))
-
-
-def _operator_note(manual_context):
-    ref = _audit_reference(manual_context)
-    return ((manual_context or {}).get("operator_note")
-            or ref.get("operator_note")
-            or ref.get("operator_notes")
-            or "")
-
-
 def _manual_context_id(manual_context):
     return ((manual_context or {}).get("context_id")
             or (manual_context or {}).get("manual_context_id"))
@@ -96,8 +75,7 @@ def manual_context_hash(ctx):
     material = {
         "context_id": _manual_context_id(ctx),
         "direction_bias": ctx.get("direction_bias"),
-        "planning_dte_range": _range(planning, "dte_hours_min", "dte_hours_max",
-                                      "dte_hours_range"),
+        "target_dte_hours": planning.get("target_dte_hours"),
         "delta_range": (_range(planning, "short_delta_min", "short_delta_max",
                                "short_delta_range")
                         if ("short_delta_min" in planning
@@ -109,7 +87,6 @@ def manual_context_hash(ctx):
                                           "protection_width_max",
                                           "protection_width_range"),
         "amount": planning.get("amount", ctx.get("amount")),
-        "audit_card_id": _audit_card_id(ctx),
         "risk_policy": risk_policy,
         "expires_ts_ms": ctx.get("expires_ts_ms"),
         "market_context": ctx.get("market_context") or {},
@@ -177,8 +154,6 @@ def build_approval_snapshot(candidate, session_id, manual_context, refresh_seq, 
         "session_id": session_id,
         "manual_context_id": ctx_id,
         "manual_context_hash": ctx_hash,
-        "audit_card_id": _audit_card_id(manual_context),
-        "operator_note": _operator_note(manual_context),
         "direction_bias": manual_context.get("direction_bias"),
         "config_hash": cfg_hash,
         "refresh_seq": refresh_seq,
@@ -244,8 +219,6 @@ def build_recommendation_library(menu, session_id, manual_context, refresh_seq, 
         "session_id": session_id,
         "manual_context_id": ctx_id,
         "manual_context_hash": ctx_hash,
-        "audit_card_id": _audit_card_id(manual_context),
-        "operator_note": _operator_note(manual_context),
         "direction_bias": manual_context.get("direction_bias"),
         "config_hash": cfg_hash,
         "refresh_seq": refresh_seq,

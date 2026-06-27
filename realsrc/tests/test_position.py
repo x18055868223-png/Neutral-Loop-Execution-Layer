@@ -9,8 +9,7 @@ def _approx(a, b, eps=1e-12):
 
 
 _LOCKED = {"session_id": "s1", "manual_context_id": "manual-1",
-           "manual_context_hash": "ctxhash", "audit_card_id": "BTC #4501",
-           "operator_note": "approved", "direction_bias": "SHORT_CALL",
+           "manual_context_hash": "ctxhash", "direction_bias": "SHORT_CALL",
            "approval_id": "appr-1", "strategy_code": "VCS|CALL|X|78000|80000",
            "quality_code": "abcd1234", "plan_hash": "ph16", "side": "CALL",
            "short_instrument": "BTC-X-78000-C", "long_instrument": "BTC-X-80000-C"}
@@ -35,8 +34,8 @@ def test_build_snapshot_80pct_budget():
     assert snap["position_id"] == "pos-1000" and snap["side"] == "CALL"
     assert snap["manual_context_id"] == "manual-1"
     assert snap["manual_context_hash"] == "ctxhash"
-    assert snap["audit_card_id"] == "BTC #4501"
-    assert snap["operator_note"] == "approved"
+    assert "audit_card_id" not in snap
+    assert "operator_note" not in snap
     assert snap["direction_bias"] == "SHORT_CALL"
     assert snap["approval_id"] == "appr-1"
     assert snap["plan_hash"] == "ph16"

@@ -16,8 +16,6 @@ def _restore_ex():
     EX.RUN_PROFILE = "TEST"
     EX.KILL_NEW_RISK = False
     EX.EMERGENCY_REDUCE_ONLY = False
-    EX.ALLOW_TRADING = False
-    EX.KILL_SWITCH = False
 
 
 def _approx(a, b, eps=1e-9):
@@ -78,7 +76,8 @@ def _mock_quote(_inst):
 
 
 def test_maker_fill_dry_shows_intent():
-    EX.ALLOW_TRADING = False
+    EX.RUN_PROFILE = "TEST"
+    EX.ALLOW_ENTRY_TRADING = False
     EX.dbt_ticker = _mock_quote
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.0001}
     r = EX.exec_maker_only_fill("sell", "X", 0.1)

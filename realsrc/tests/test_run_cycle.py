@@ -75,17 +75,13 @@ def _setup():
     ST.SETTLEMENT_CURRENCY = "BTC"
     EX.SETTLEMENT_CURRENCY = "BTC"
     ST.MANUAL_PLANNING_ALLOWED = True
-    ST.MANUAL_AUDIT_CARD_ID = "manual-card-1"
-    ST.MANUAL_AUDIT_NOTE = "operator approved planning"
-    ST.MANUAL_CONTEXT_TTL_MIN = 30
     ST.DIRECTION_BIAS = "SHORT_CALL"
     ST.SHORT_DELTA_RANGE = (0.15, 0.45)
     ST.PROTECTION_WIDTH_RANGE = (2000, 2500)
-    ST.SHORT_DTE_HOURS = (24, 72)
+    ST.TARGET_DTE_HOURS = 24
     ST.ORDER_AMOUNT = 0.1
     ST.MENU_SIZE = 6
     ST.MIN_MARGIN_RELIEF_RATIO = 0.10
-    ST.MIN_SHORT_PREMIUM = 0.0005
     ST.MAX_SPREAD_RATIO = 0.60
     ST.PLAN_WEIGHTS = {"win_rate": 0.50, "rr": 0.50, "manual": 0.0}
     ST.UNDERLYING_REF_PRICE = None
@@ -179,8 +175,8 @@ def test_run_cycle_locked_plan_expires_and_rebuilds_library():
     ST.run_cycle(now + 100)
     expired = ST.run_cycle(now + 2000)
     assert expired["lineage_invalidation"] == "APPROVAL_EXPIRED"
-    assert expired["console_phase"] == "HARD_APPROVAL_WAIT"
-    assert expired["pending_candidates"]
+    assert expired["console_phase"] == "PLAN_MENU_READY"
+    assert fmz_shim._G(ST._LOCKED_KEY) is None
 
 
 def test_run_cycle_manual_context_change_invalidates_old_approval():
@@ -190,7 +186,7 @@ def test_run_cycle_manual_context_change_invalidates_old_approval():
     first = ST.run_cycle(now)
     fmz_shim._commands.append("执行:" + first["pending_candidates"][0]["confirm_code"])
     ST.run_cycle(now + 1)
-    ST.MANUAL_AUDIT_CARD_ID = "manual-card-2"
+    ST.ORDER_AMOUNT = 0.2
     changed = ST.run_cycle(now + 2)
     assert changed["lineage_invalidation"] == "MANUAL_CONTEXT_CHANGED"
     assert fmz_shim._G(ST._LOCKED_KEY) is None
@@ -227,7 +223,6 @@ def test_existing_position_manages_without_manual_planning_enabled():
     fmz_shim._G(ST._POSITION_KEY, {
         "position_id": "pos-manual",
         "manual_context_id": "manual-1",
-        "audit_card_id": "manual-card",
         "side": "CALL",
         "short_instrument": "BTC-S-76000-C",
         "long_instrument": "BTC-S-78000-C",
