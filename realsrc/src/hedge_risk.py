@@ -12,6 +12,7 @@ import math
 
 SCHEMA_NAME = "PositionRiskPackage"
 SCHEMA_VERSION = "nrd.integration.position_risk.v0.4"
+TRIGGER_SCHEMA_VERSION = "nrd.execution.hedge_trigger.v1"
 
 STATE_NORMAL = "NORMAL"
 STATE_WATCH = "WATCH"
@@ -154,6 +155,84 @@ def build_entry_risk_anchor(direction_bias, entry_price, entry_dte_hours,
     }
 
 
+def build_hedge_trigger_policy(entry_touch_probability, target_delta_reduction_ratio,
+                               hedge_price_line=None):
+    p_entry = _clamp(_safe_float(entry_touch_probability) or 0.0, 0.0, 0.98)
+    return {
+        "schema_name": "HedgeTriggerPolicy",
+        "schema_version": TRIGGER_SCHEMA_VERSION,
+        "entry_touch_probability": p_entry,
+        "watch_probability": min(max(p_entry + 0.10, 0.40), 0.70),
+        "open_probability": min(max(p_entry + 0.20, 0.50), 0.80),
+        "emergency_probability": min(max(p_entry + 0.35, 0.70), 0.95),
+        "min_probability_drift_to_open": 0.20,
+        "target_delta_reduction_ratio": target_delta_reduction_ratio,
+        "trigger_mode": "BOT_SIDE_RECHECK",
+        "native_trigger": False,
+        "hedge_price_line": hedge_price_line,
+    }
+
+
+def _price_line_touched(direction_bias, current_price, hedge_price_line):
+    line = _safe_float(hedge_price_line)
+    price = _safe_float(current_price)
+    if line is None or price is None:
+        return False
+    return price >= line if _is_short_call(direction_bias) else price <= line
+
+
+def evaluate_hedge_trigger(direction_bias, entry_risk_anchor, current_price,
+                           probability_now, policy=None):
+    anchor = entry_risk_anchor or {}
+    p_entry = _safe_float(anchor.get("entry_touch_probability"))
+    if p_entry is None:
+        return {"tail_risk_state": STATE_MANUAL_REVIEW,
+                "reason_codes": ["MISSING_ENTRY_RISK_ANCHOR"],
+                "current_risk": {}, "price_line_touched": False}
+    pol = policy or build_hedge_trigger_policy(p_entry, 0.5)
+    p_now = _clamp(_safe_float(probability_now) or 0.0, 0.0, 1.0)
+    drift = p_now - p_entry
+    boundary = anchor.get("entry_loss_boundary")
+    breached = _breached(direction_bias, _safe_float(current_price) or 0.0,
+                         _safe_float(boundary) or 0.0)
+    line_touched = _price_line_touched(
+        direction_bias, current_price, pol.get("hedge_price_line"))
+    reasons = []
+    if breached:
+        state = STATE_HEDGE_READY
+        reasons.append("BOUNDARY_BREACHED")
+    elif p_now >= (pol.get("emergency_probability") or 1.0):
+        state = STATE_HEDGE_READY
+        reasons.append("EMERGENCY_TOUCH_PROBABILITY")
+    elif (p_now >= (pol.get("open_probability") or 1.0)
+          and drift >= (pol.get("min_probability_drift_to_open") or 0.0)):
+        state = STATE_HEDGE_READY
+        reasons.append("TOUCH_PROBABILITY_DETERIORATED")
+    elif line_touched:
+        state = STATE_WATCH
+        reasons.append("PRICE_LINE_TOUCHED_RECHECK_NOT_CONFIRMED")
+    elif p_now >= (pol.get("watch_probability") or 1.0):
+        state = STATE_WATCH
+        reasons.append("TOUCH_PROBABILITY_WATCH")
+    else:
+        state = STATE_NORMAL
+        reasons.append("TOUCH_PROBABILITY_NORMAL")
+    return {
+        "tail_risk_state": state,
+        "reason_codes": reasons,
+        "hedge_trigger_policy": pol,
+        "price_line_touched": line_touched,
+        "current_risk": {
+            "touch_probability_now": p_now,
+            "touch_probability_drift": drift,
+            "entry_touch_probability": p_entry,
+            "watch_probability": pol.get("watch_probability"),
+            "open_probability": pol.get("open_probability"),
+            "emergency_probability": pol.get("emergency_probability"),
+        },
+    }
+
+
 def _recent_slope(current_probability, recent_history, now_ms,
                   recent_window_ms=30 * 60 * 1000):
     now = _safe_float(now_ms)
@@ -253,32 +332,12 @@ def exit_vs_hedge_friction(exit_friction):
     data = exit_friction or {}
     option_score = _friction_score(data.get("option_exit_friction"))
     hedge_score = _friction_score(data.get("future_hedge_friction"))
-    hedge_preferred = option_score - hedge_score >= 1 and option_score >= 3
     return {
         "option_exit_friction": data.get("option_exit_friction"),
         "future_hedge_friction": data.get("future_hedge_friction"),
         "option_exit_score": option_score,
         "future_hedge_score": hedge_score,
-        "hedge_friction_advantage": hedge_preferred,
     }
-
-
-def _state_from_inputs(probability_now, drift, slope, persistence, friction,
-                       existing_hedge=False):
-    if existing_hedge:
-        return STATE_HEDGE_ACTIVE
-    risk_elevated = (
-        probability_now >= 0.50 or drift >= 0.10 or slope >= 0.20)
-    if not risk_elevated:
-        return STATE_NORMAL
-    risk_severe = (
-        probability_now >= 0.65 or drift >= 0.20 or slope >= 0.30)
-    if (risk_severe and persistence in (PERSISTENCE_MEDIUM, PERSISTENCE_HIGH)
-            and friction.get("hedge_friction_advantage")):
-        return STATE_HEDGE_READY
-    if not friction.get("hedge_friction_advantage"):
-        return STATE_EXIT_PREFERRED
-    return STATE_WATCH
 
 
 def _hedge_side(direction_bias):
@@ -351,51 +410,29 @@ def evaluate_position_risk(position_id, direction_bias, entry_risk_anchor,
         direction_bias, current_price, loss_boundary, dte_hours, iv,
         short_delta)
     p_entry = _safe_float(entry_risk_anchor.get("entry_touch_probability")) or 0.0
-    drift = p_now - p_entry
-    slope = _recent_slope(p_now, recent_history, now_ms)
-    tail_acc = _tail_exposure_acceleration(
-        direction_bias, current_price, loss_boundary, short_delta,
-        short_gamma, entry_risk_anchor)
-    persistence, confirmations = persistence_score(
-        direction_bias, edb, gamma_regime)
-    if (persistence == PERSISTENCE_LOW and tail_acc == PERSISTENCE_HIGH
-            and (p_now >= 0.65 or drift >= 0.20)):
-        persistence = PERSISTENCE_MEDIUM
-        confirmations.append("LOCAL_TAIL_ACCELERATION")
-    friction = exit_vs_hedge_friction(exit_friction)
-    state = _state_from_inputs(
-        p_now, drift, slope, persistence, friction, existing_hedge)
-    breached = _breached(
-        direction_bias, _safe_float(current_price) or 0.0,
-        _safe_float(loss_boundary) or 0.0)
+    policy = entry_risk_anchor.get("hedge_trigger_policy") or build_hedge_trigger_policy(
+        p_entry, 0.5)
+    trigger = evaluate_hedge_trigger(
+        direction_bias, entry_risk_anchor, current_price, p_now, policy)
+    state = trigger["tail_risk_state"]
     hedge_intent = None
     if state == STATE_HEDGE_READY:
         hedge_intent = _make_hedge_intent(
-            position_id, direction_bias, p_now, drift, tail_acc, persistence,
-            breached)
-
-    reason_codes = list(confirmations)
-    if drift > 0:
-        reason_codes.append("TOUCH_PROBABILITY_DRIFT_POSITIVE")
-    if slope > 0:
-        reason_codes.append("RECENT_DETERIORATION_SLOPE_POSITIVE")
-    if friction.get("hedge_friction_advantage"):
-        reason_codes.append("HEDGE_FRICTION_ADVANTAGE")
+            position_id, direction_bias, p_now,
+            trigger["current_risk"]["touch_probability_drift"],
+            PERSISTENCE_LOW, PERSISTENCE_LOW,
+            "BOUNDARY_BREACHED" in trigger["reason_codes"])
 
     return {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "position_id": position_id,
         "entry_risk_anchor": entry_risk_anchor,
-        "current_risk": {
-            "touch_probability_now": p_now,
-            "touch_probability_drift": drift,
-            "recent_deterioration_slope": slope,
-            "tail_exposure_acceleration": tail_acc,
-            "persistence": persistence,
-        },
-        "exit_vs_hedge_friction": friction,
+        "current_risk": trigger["current_risk"],
+        "hedge_trigger_policy": trigger["hedge_trigger_policy"],
+        "price_line_touched": trigger["price_line_touched"],
+        "exit_vs_hedge_friction": exit_vs_hedge_friction(exit_friction),
         "tail_risk_state": state,
         "hedge_intent": hedge_intent,
-        "reason_codes": reason_codes,
+        "reason_codes": trigger["reason_codes"],
     }

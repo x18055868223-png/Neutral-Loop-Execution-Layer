@@ -20,14 +20,69 @@ def test_default_config_is_dry_run_ready():
     assert C.validate_config() == []
 
 
+def test_run_profile_test_forces_effective_gates_off():
+    old = {
+        "RUN_PROFILE": C.RUN_PROFILE,
+        "ALLOW_ENTRY_TRADING": C.ALLOW_ENTRY_TRADING,
+        "ALLOW_EXIT_TRADING": C.ALLOW_EXIT_TRADING,
+        "ALLOW_HEDGE_TRADING": C.ALLOW_HEDGE_TRADING,
+        "DRY_RUN_PASSED": C.DRY_RUN_PASSED,
+    }
+    try:
+        C.RUN_PROFILE = "TEST"
+        C.ALLOW_ENTRY_TRADING = True
+        C.ALLOW_EXIT_TRADING = True
+        C.ALLOW_HEDGE_TRADING = True
+        C.DRY_RUN_PASSED = True
+
+        assert C.validate_config() == []
+        gates = C.effective_trading_gates()
+        assert gates["profile"] == "TEST"
+        assert gates["allow_entry"] is False
+        assert gates["allow_exit"] is False
+        assert gates["allow_hedge"] is False
+    finally:
+        for k, v in old.items():
+            setattr(C, k, v)
+
+
+def test_run_profile_live_requires_minimum_checklist():
+    old = {
+        "RUN_PROFILE": C.RUN_PROFILE,
+        "DRY_RUN_PASSED": C.DRY_RUN_PASSED,
+        "ALLOW_ENTRY_TRADING": C.ALLOW_ENTRY_TRADING,
+        "ALLOW_EXIT_TRADING": C.ALLOW_EXIT_TRADING,
+        "ALLOW_HEDGE_TRADING": C.ALLOW_HEDGE_TRADING,
+        "RISK_EXIT_MAX_SPEND": C.RISK_EXIT_MAX_SPEND,
+    }
+    try:
+        C.RUN_PROFILE = "LIVE"
+        C.DRY_RUN_PASSED = False
+        C.ALLOW_ENTRY_TRADING = False
+        C.ALLOW_EXIT_TRADING = False
+        C.ALLOW_HEDGE_TRADING = False
+        C.RISK_EXIT_MAX_SPEND = 0.0
+
+        errs = C.validate_config()
+        missing = C.live_checklist_missing()
+        for key in ("DRY_RUN_PASSED", "ALLOW_ENTRY_TRADING",
+                    "ALLOW_EXIT_TRADING", "RISK_EXIT_MAX_SPEND"):
+            assert key in missing
+            assert any(key in e for e in errs)
+    finally:
+        for k, v in old.items():
+            setattr(C, k, v)
+
+
 def test_live_trading_gates_require_dry_run_passed():
-    errs = _with_config(DRY_RUN_PASSED=False, ALLOW_EXIT_TRADING=True)
+    errs = _with_config(RUN_PROFILE="LIVE", DRY_RUN_PASSED=False,
+                        ALLOW_EXIT_TRADING=True)
 
     assert any("DRY_RUN_PASSED" in e for e in errs)
 
 
 def test_entry_live_requires_exit_path_and_risk_budget():
-    errs = _with_config(DRY_RUN_PASSED=True, ALLOW_ENTRY_TRADING=True,
+    errs = _with_config(RUN_PROFILE="LIVE", DRY_RUN_PASSED=True, ALLOW_ENTRY_TRADING=True,
                         ALLOW_EXIT_TRADING=False, RISK_EXIT_MAX_SPEND=0.0)
 
     assert any("ALLOW_EXIT_TRADING" in e for e in errs)

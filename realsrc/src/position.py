@@ -80,6 +80,7 @@ def build_vertical_entry_snapshot(locked, short_fill, long_fill, entry_fees,
         "long_remaining_qty": la,          # 保护腿剩余（回收时递减；持仓真相之一）
         "short_expiry_ts": locked.get("short_expiry"),     # 短腿到期（持仓后 DTE/风险评估用）
         "entry_risk_anchor": entry_risk_anchor,            # 入场风险锚（风险严重度→仲裁）
+        "hedge_trigger_policy": (entry_risk_anchor or {}).get("hedge_trigger_policy"),
         "frozen_ts": now_ts,
         "manual_lineage_only": True,
         "immutable": True,

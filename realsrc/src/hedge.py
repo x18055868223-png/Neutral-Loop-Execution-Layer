@@ -2,16 +2,15 @@
 """BTC-PERPETUAL 对冲生命周期（hedge_*）。纯函数，便于单测。
 
 对冲场所由操作者显式配置：
-  - 对冲工具默认 DERIBIT BTC-PERPETUAL（反向、与期权同所、便于统一账本/恢复）；
-    **可选** BINANCE BTCUSDC 永续（线性、USDC maker 0 费）——对冲腿非高频，maker 等成交可省成本。
-    场所为**操作者显式配置选择**（HEDGE_VENUE），**非运行时自动切换**（避免补充意见所警示的 UNBOUND）。
+  - 默认 BINANCE BTCUSDC 永续（线性），Deribit BTC-PERPETUAL 仅作兼容；
+  - 风险触发对冲使用 PROMPT_LIMIT，不由场所 maker 偏好覆盖；
   - 目标数量随**剩余卖方期权敞口**变化；短腿归零 / 结构 CLOSED|SETTLED → 目标立即归零（不等保护腿）；
   - **HEDGE_OPEN/INCREASE 非 reduce_only**（reduce_only 无法建仓）；HEDGE_REDUCE/UNWIND 强制 reduce_only；
   - 期权卖方风险消失但 perp 仍有持仓 → 孤儿对冲紧急态（持续 reduce_only 清理，会话不得 CLOSED）。
   - 换算：DERIBIT 反向(USD 合约)=delta_btc·spot/contract_size；BINANCE 线性(BTC)=delta_btc。
 """
 HEDGE_INSTRUMENT = "BTC-PERPETUAL"
-HEDGE_VENUE = "DERIBIT"
+HEDGE_VENUE = "BINANCE"
 
 VENUE_DERIBIT = "DERIBIT"
 VENUE_BINANCE = "BINANCE"
@@ -19,15 +18,14 @@ VENUE_BINANCE = "BINANCE"
 _EPS = 1e-9
 
 
-def hedge_venue_config(venue, binance_instrument="BTCUSDC", binance_maker_only=True):
-    """返回场所配置 {venue, instrument, linear, maker_only}。
-    DERIBIT：BTC-PERPETUAL、反向、对冲开仓可 taker(prompt)；
-    BINANCE：BTCUSDC 永续、线性(BTC)、USDC maker 0 费 → 默认强制 maker(post-only)。"""
-    if str(venue or VENUE_DERIBIT).upper() == VENUE_BINANCE:
+def hedge_venue_config(venue=None, binance_instrument="BTCUSDC", exchange_index=1):
+    """返回场所配置 {venue, instrument, linear, exchange_index?}。
+    对冲执行方式由 exec_hedge_step 的 execution_style 决定，不在场所配置里夹 maker-only。"""
+    if str(venue or VENUE_BINANCE).upper() == VENUE_BINANCE:
         return {"venue": VENUE_BINANCE, "instrument": binance_instrument,
-                "linear": True, "maker_only": bool(binance_maker_only)}
+                "linear": True, "exchange_index": exchange_index}
     return {"venue": VENUE_DERIBIT, "instrument": HEDGE_INSTRUMENT,
-            "linear": False, "maker_only": False}
+            "linear": False}
 
 
 def _is_num(x):
@@ -53,6 +51,42 @@ def structure_net_delta(short_delta, protection_delta):
     if not _is_num(protection_delta):
         return short_delta
     return short_delta - protection_delta
+
+
+def option_net_delta(remaining_short_qty, short_delta, long_remaining_qty=0.0,
+                     protection_delta=None):
+    """当前期权组合净 delta(BTC)：短腿卖出取负，保护腿买入取正。"""
+    if not _is_num(short_delta):
+        return None
+    short_qty = remaining_short_qty or 0.0
+    long_qty = long_remaining_qty or 0.0
+    net = -short_qty * short_delta
+    if _is_num(protection_delta):
+        net += long_qty * protection_delta
+    return net
+
+
+def _round_abs_to_step(value, step):
+    if not step or step <= 0:
+        return value
+    sign = -1.0 if value < 0 else 1.0
+    return sign * round(abs(value) / step) * step
+
+
+def hedge_target_position(net_option_delta, reduction_ratio, spot, contract_size,
+                          min_trade_amount, linear=False):
+    """把期权净 delta 转为目标 hedge 仓位（带方向）。
+    线性 Binance：BTC 数量；反向 Deribit：USD 合约数。"""
+    if not _is_num(net_option_delta):
+        return 0.0
+    target_delta = -net_option_delta * (reduction_ratio or 1.0)
+    if linear:
+        raw = target_delta
+    else:
+        if not (_is_num(spot) and _is_num(contract_size)) or contract_size <= 0:
+            return 0.0
+        raw = target_delta * spot / contract_size
+    return _round_abs_to_step(raw, min_trade_amount)
 
 
 def hedge_direction_consistent(side, struct_net_delta):

@@ -57,11 +57,12 @@ def test_orphan_detection():
 def test_hedge_venue_config():
     d = H.hedge_venue_config("DERIBIT")
     assert d["venue"] == "DERIBIT" and d["instrument"] == "BTC-PERPETUAL"
-    assert d["linear"] is False and d["maker_only"] is False
+    assert d["linear"] is False and "maker_only" not in d
     b = H.hedge_venue_config("BINANCE")
     assert b["venue"] == "BINANCE" and b["instrument"] == "BTCUSDC"
-    assert b["linear"] is True and b["maker_only"] is True       # USDC maker 0 费 → 默认 maker
-    assert H.hedge_venue_config(None)["venue"] == "DERIBIT"      # 默认 Deribit
+    assert b["linear"] is True and b["exchange_index"] == 1
+    assert "maker_only" not in b
+    assert H.hedge_venue_config(None)["venue"] == "BINANCE"      # 默认 Binance
 
 
 def test_hedge_target_linear_vs_inverse():
@@ -73,6 +74,13 @@ def test_hedge_target_linear_vs_inverse():
     assert inv > 1000
     # 线性下短腿归零仍 → 0
     assert H.hedge_target_contracts(0.0, 0.3, 0.5, 73000, 1, 0.001, linear=True) == 0.0
+
+
+def test_option_net_delta_and_signed_target_use_actual_leg_quantities():
+    net = H.option_net_delta(0.05, 0.35, 0.10, 0.10)
+    assert abs(net - (-0.0075)) < 1e-12
+    tgt = H.hedge_target_position(net, 0.5, 60000, 1.0, 0.001, linear=True)
+    assert abs(tgt - 0.004) < 1e-12
 
 
 def test_structure_net_delta():

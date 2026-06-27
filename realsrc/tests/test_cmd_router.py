@@ -15,6 +15,8 @@ CTX = {"robot_id": "r1", "session_id": "s1", "refresh_seq": 7}
 def test_parse_basic_and_aliases():
     c = CR.parse_command("执行:A4F2")
     assert c["type"] == "EXECUTE" and c["arg"] == "A4F2" and c["name"] == "执行"
+    bare = CR.parse_command("A4F2")
+    assert bare["type"] == "EXECUTE" and bare["arg"] == "A4F2"
     assert CR.parse_command("拒绝")["type"] == "REJECT"
     assert CR.parse_command("EXIT_AUTHORIZE:9C1E")["type"] == "EXIT_AUTHORIZE"
     assert CR.parse_command("授权止盈:Z9")["arg"] == "Z9"

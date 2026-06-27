@@ -195,12 +195,21 @@ def disp_health_grade(ctx):
 
 def _overview_table(ctx):
     g = ctx.get
+    missing = g("live_checklist_missing") or []
+    profile_line = g("run_profile") or "?"
+    if profile_line == "TEST":
+        profile_line += " / live gates forced off"
+    elif missing:
+        profile_line += " / missing " + ",".join(missing)
+    else:
+        profile_line += " / live checklist ready"
     return {
         "type": "table", "title": "运行概览",
         "cols": ["项目", "值"],
         "rows": [
             ["版本 / 轮次", "v%s ｜ %s" % (g("version") or "?",
                 "计划轮(PLAN)" if g("round_mode") == "PLAN" else "下单轮(ORDER)")],
+            ["RUN_PROFILE", profile_line],
             ["标的 / 结算币", g("currency")],
             ["人工审计门 / TTL", "%s / %s" % (disp_manual_gate_state_cn(g("manual_gate_state")), g("manual_context_ttl_min"))],
             ["方向", BIAS_CN.get(g("direction_bias"), g("direction_bias"))],
@@ -377,11 +386,12 @@ def disp_operation_hint(ctx):
     if g("kill_new_risk"):
         return _HINTS["KILLED"]
     phase = g("console_phase")
-    # 风险严重(EXIT_PREFERRED) 且未授权：优先引导风险退出授权（区别于 80% 止盈授权）
-    if phase == "POSITION_MANAGE" and g("risk_state") == "EXIT_PREFERRED" \
+    # 风险触发后优先引导风险退出授权；退出不可执行时仲裁器再回退到对冲。
+    if phase == "POSITION_MANAGE" and g("risk_state") in ("HEDGE_READY", "EXIT_PREFERRED") \
             and "已授权" not in (g("exit_auth_state") or ""):
-        return ("风险严重(EXIT_PREFERRED)：点【风险退出授权】输入风险退出码 %s 允许越价限价退出"
-                "（成本封顶：RISK_EXIT_MAX_SPEND>0 用该值，否则用入场冻结退出预算）" % (g("risk_exit_auth_code") or "—"))
+        return ("风险触发(%s)：点【风险退出授权】输入风险退出码 %s 允许越价限价退出"
+                "（成本封顶：RISK_EXIT_MAX_SPEND>0 用该值，否则用入场冻结退出预算）"
+                % (g("risk_state") or "—", g("risk_exit_auth_code") or "—"))
     if phase in _HINTS:
         return _HINTS[phase]
     sv = g("manual_verdict") or {}
@@ -426,7 +436,7 @@ def disp_manual_gate_line(verdict):
 
 _RISK_STATE_CN = {
     "NORMAL": "正常", "WATCH": "观察", "EXIT_PREFERRED": "偏退出(风险严重)",
-    "HEDGE_READY": "偏对冲(风险严重持续)", "HEDGE_ACTIVE": "对冲监控中",
+    "HEDGE_READY": "风险触发(先退后对冲)", "HEDGE_ACTIVE": "对冲监控中",
     "MANUAL_REVIEW": "人工复核",
 }
 

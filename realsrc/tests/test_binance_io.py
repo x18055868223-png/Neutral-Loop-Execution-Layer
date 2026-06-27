@@ -6,13 +6,13 @@ import fmz_shim
 
 
 def test_place_hedge_dry():
-    r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, True, allow_live=False)
-    assert r["dry"] and r["venue"] == "BINANCE" and r["maker_only"] is True
+    r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, allow_live=False)
+    assert r["dry"] and r["venue"] == "BINANCE" and r["post_only"] is False
     assert r["reason"] == "BINANCE_HEDGE_DRYRUN"
 
 
 def test_place_hedge_no_op():
-    assert B.bnc_place_hedge("BTCUSDC", "buy", 0.0, False, True, allow_live=False)["reason"] == "NO_OP"
+    assert B.bnc_place_hedge("BTCUSDC", "buy", 0.0, False, allow_live=False)["reason"] == "NO_OP"
 
 
 def test_get_position_empty_returns_zero():
@@ -22,10 +22,10 @@ def test_get_position_empty_returns_zero():
 def test_place_hedge_live_submits_via_exchange():
     fmz_shim.exchanges[1].ticker = {"Buy": 73000.0, "Sell": 73010.0}
     try:
-        r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, True, allow_live=True)
-        assert r["venue"] == "BINANCE" and r["reason"] == "BINANCE_HEDGE_SUBMITTED"
+        r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, allow_live=True)
+        assert r["venue"] == "BINANCE" and r["reason"] == "BINANCE_HEDGE_STEP"
         # reduce_only 平仓方向
-        r2 = B.bnc_place_hedge("BTCUSDC", "sell", 0.01, True, True, allow_live=True)
+        r2 = B.bnc_place_hedge("BTCUSDC", "sell", 0.01, True, allow_live=True)
         assert r2["reduce_only"] is True
     finally:
         fmz_shim.exchanges[1].ticker = {}

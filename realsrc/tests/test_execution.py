@@ -13,6 +13,7 @@ def _restore_ex():
     for k, v in _ORIG.items():
         setattr(EX, k, v)
     EX.ALLOW_ENTRY_TRADING = False
+    EX.RUN_PROFILE = "TEST"
     EX.KILL_NEW_RISK = False
     EX.EMERGENCY_REDUCE_ONLY = False
     EX.ALLOW_TRADING = False
@@ -78,6 +79,7 @@ def test_maker_fill_dry_shows_intent():
 
 
 def test_maker_fill_live_fills():
+    EX.RUN_PROFILE = "LIVE"
     EX.ALLOW_ENTRY_TRADING = True
     EX.dbt_ticker = _mock_quote
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.0001}
@@ -94,6 +96,7 @@ def test_maker_fill_live_fills():
 
 
 def test_maker_fill_wide_spread_guard():
+    EX.RUN_PROFILE = "LIVE"
     EX.ALLOW_ENTRY_TRADING = True
     EX.dbt_ticker = lambda i: {"mark_price": 0.01, "best_bid_price": 0.005,
                                "best_ask_price": 0.02, "greeks": {}}
@@ -154,8 +157,12 @@ def test_hedge_step_deribit_no_quote_guard():
 def test_hedge_step_deribit_confirms_fill():
     EX.dbt_ticker = lambda i: {"mark_price": 50000, "best_bid_price": 49999, "best_ask_price": 50001}
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.5}
-    EX.dbt_place_order = lambda side, inst, amt, price, **k: {
-        "order": {"order_id": "h1", "order_state": "open", "filled_amount": 0.0}}
+    seen = {}
+    def _place(side, inst, amt, price, **k):
+        seen["price"] = price
+        seen["post_only"] = k.get("post_only")
+        return {"order": {"order_id": "h1", "order_state": "open", "filled_amount": 0.0}}
+    EX.dbt_place_order = _place
     EX.dbt_get_order_state = lambda oid: {
         "order": {"order_id": oid, "order_state": "filled", "filled_amount": 100.0, "average_price": 50001}}
     EX.dbt_cancel = lambda oid: {"order_id": oid}
@@ -163,4 +170,6 @@ def test_hedge_step_deribit_confirms_fill():
     vcfg = {"venue": "DERIBIT", "instrument": "BTC-PERPETUAL", "maker_only": False}
     r = EX.exec_hedge_step(vcfg, "buy", 100.0, reduce_only=False, allow_live=True)
     assert not r["dry"] and _approx(r["filled"], 100.0) and r["reason"] == "HEDGE_STEP"  # 等待后查得成交
+    assert seen["post_only"] is False and _approx(seen["price"], 50026.0005)
+    assert r["execution_style"] == "PROMPT_LIMIT"
     _restore_ex()

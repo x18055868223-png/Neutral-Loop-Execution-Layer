@@ -43,8 +43,12 @@ def parse_command(raw):
     else:
         name, arg = s, ""
     name = name.strip()
+    ctype = COMMAND_ALIASES.get(name)
+    if ctype is None and ":" not in s and 3 <= len(name) <= 12:
+        if all(("0" <= ch <= "9") or ("A" <= ch.upper() <= "Z") for ch in name):
+            ctype, arg = "EXECUTE", name
     return {"raw": s, "name": name,
-            "type": COMMAND_ALIASES.get(name, "UNKNOWN"), "arg": arg.strip()}
+            "type": ctype or "UNKNOWN", "arg": arg.strip()}
 
 
 def is_consume(command):
