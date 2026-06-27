@@ -98,6 +98,8 @@ def _setup():
     ST.RISK_EXIT_MAX_SPEND = 0.0
     ST.ROBOT_ID = "r-test"
     ST.HEDGE_VENUE = "DERIBIT"
+    ST.fetch_gex_vrp_context = lambda *_a, **_k: {
+        "valid": False, "status": "VRP_CONTEXT_MISSING", "market_context": None}
     ST._LOCKED["detail_id"] = None
     ST.ledger_set_state(ST.S_NO_POSITION)
     return ST
@@ -105,17 +107,10 @@ def _setup():
 
 def _fat_vrp_context():
     return {
+        "source": "GEX_MONITOR_IV_RV_RANK",
         "side": "SHORT_CALL",
-        "front_anchor_iv": 1.20,
-        "atm_front_iv": 1.10,
-        "term_reference_iv_5_10d": 1.10,
-        "rv_24h": 0.20,
-        "rv_72h": 0.18,
-        "rv_7d": 0.16,
-        "rv_percentile": 0.50,
-        "history_days": 90,
-        "executable_short_iv": 1.25,
-        "executable_protection_iv": 1.00,
+        "iv_rv_ratio": 0.8,
+        "iv_rv_rank_pct": 15.2,
     }
 
 

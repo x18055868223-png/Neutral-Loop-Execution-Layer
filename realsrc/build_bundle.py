@@ -23,11 +23,11 @@ OUT = os.path.join(HERE, "spm_manual_gate_execution_fmz.py")
 MODULE_ORDER = ["config", "manual_context", "gates", "cmd_router", "recommend", "position",
                 "authorization", "deribit_io", "binance_io", "leg_selection",
                 "accounting", "plans", "display", "spm_sim", "hedge", "execution", "ledger",
-                "execution_feasibility", "hedge_risk", "vrp_gate", "risk_controls",
+                "execution_feasibility", "hedge_risk", "risk_controls",
                 "strategy"]
 
 # 需剥离 import 的项目模块（fmz_shim 由 FMZ 运行时提供）
-PROJECT_MODULES = set(MODULE_ORDER) | {"fmz_shim"}
+PROJECT_MODULES = set(MODULE_ORDER) | {"fmz_shim", "vrp_gate"}
 
 _IMPORT_FROM = re.compile(r"^\s*from\s+([A-Za-z_][\w]*)\s+import\b")
 _IMPORT_PLAIN = re.compile(r"^\s*import\s+([A-Za-z_][\w]*)")
@@ -103,8 +103,7 @@ def check(src):
                "dbt_simulate_portfolio", "disp_status_panel", "disp_menu_table",
                "plan_assemble", "plan_rank", "legsel_expiries_in_band", "main",
                # 整合层（R2-R5）：会话/VRP门/缺口域/对冲，须全部在单文件命名空间内
-               "assess_window", "assess_candidate",
-               "gate_plan", "apply_vrp_gate", "black_scholes_price_usd",
+               "fetch_gex_vrp_context",
                "evaluate_portfolio_budget", "decide_position_manage", "build_attribution",
                "validate_manual_context", "manual_context_hash",
                "build_entry_risk_anchor", "evaluate_position_risk",

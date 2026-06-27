@@ -54,6 +54,14 @@ def test_tick_rounding_no_cross():
     assert _approx(EX.exec_sell_price(0.00105, 0.0007, 0.0001, 0), 0.0011)
 
 
+def test_tick_size_steps_round_sell_to_effective_deribit_grid():
+    meta = {"tick_size": 0.0001,
+            "tick_size_steps": [{"above_price": 0.005, "tick_size": 0.0005}]}
+    tick = EX.exec_effective_tick(meta, 0.0072)
+    assert _approx(tick, 0.0005)
+    assert _approx(EX.exec_sell_price(0.0072, 0.0065, tick, 0, meta), 0.0075)
+
+
 def test_price_for_dispatch():
     assert _approx(EX.exec_price_for("buy", 0.0010, 0.0007, 0.0013, 0.0001, 0), 0.0010)
     assert _approx(EX.exec_price_for("sell", 0.0010, 0.0007, 0.0013, 0.0001, 0), 0.0010)
@@ -172,4 +180,47 @@ def test_hedge_step_deribit_confirms_fill():
     assert not r["dry"] and _approx(r["filled"], 100.0) and r["reason"] == "HEDGE_STEP"  # 等待后查得成交
     assert seen["post_only"] is False and _approx(seen["price"], 50026.0005)
     assert r["execution_style"] == "PROMPT_LIMIT"
+    _restore_ex()
+
+
+def test_entry_campaign_step_returns_fill_accounting_details():
+    quotes = {
+        "P": {"mark_price": 0.0010, "best_bid_price": 0.0009,
+              "best_ask_price": 0.0012, "greeks": {"delta": 0.1}},
+        "S": {"mark_price": 0.0070, "best_bid_price": 0.0065,
+              "best_ask_price": 0.0075, "greeks": {"delta": 0.3}},
+    }
+    order_ids = []
+
+    EX.dbt_ticker = lambda inst: quotes[inst]
+    EX.dbt_get_instrument = lambda inst: {"tick_size": 0.0001}
+
+    def _place(side, inst, amt, price, **kwargs):
+        oid = "p1" if inst == "P" else "s1"
+        order_ids.append((oid, side, inst, amt, price, kwargs.get("label")))
+        return {"order": {"order_id": oid, "order_state": "open", "filled_amount": 0.0}}
+
+    def _state(oid):
+        avg = 0.0010 if oid == "p1" else 0.0070
+        return {"order": {"order_id": oid, "order_state": "filled",
+                          "filled_amount": 0.1, "average_price": avg}}
+
+    EX.dbt_place_order = _place
+    EX.dbt_get_order_state = _state
+    EX.dbt_cancel = lambda oid: {"order_id": oid}
+    EX.Sleep = lambda ms: None
+
+    r = EX.exec_entry_campaign_step(
+        "P", "S", 0.1, credit_floor=0.0, max_tick_steps=0,
+        attempt=0, prot_done_qty=0.0, short_done_qty=0.0,
+        allow_live=True, label="entry")
+
+    assert r["prot_fill"] == 0.1 and r["short_fill"] == 0.1
+    assert r["prot_avg_price"] == 0.0010
+    assert r["short_avg_price"] == 0.0070
+    assert r["actual_net_credit_after_fees"] < r["actual_net_credit_before_fees"]
+    assert [f["order_id"] for f in r["fills"]] == ["p1", "s1"]
+    assert r["fills"][0]["leg"] == "protection" and r["fills"][0]["fee_estimate"] > 0
+    assert r["fills"][1]["leg"] == "short" and r["fills"][1]["spread_cost_estimate"] > 0
+    assert order_ids[0][5] == "entry_prot" and order_ids[1][5] == "entry_short"
     _restore_ex()

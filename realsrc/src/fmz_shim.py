@@ -94,6 +94,12 @@ class _MockExchange(object):
     def Sell(self, price, amount):
         return {"id": "mock-sell", "price": price, "amount": amount}
 
+    def GetOrder(self, oid):
+        return {"Id": oid, "DealAmount": 0.0, "Status": 2}
+
+    def CancelOrder(self, oid):
+        return True
+
 
 exchange = _MockExchange()
 # FMZ 多所：exchanges[0]=主所(Deribit 期权)，exchanges[1]=备用(测试占位，可设对冲所)

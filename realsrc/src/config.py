@@ -12,8 +12,13 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 # ===== 实例标识（命令幂等键 robot_id；多机器人部署时各自唯一，避免跨实例命令串扰）=====
 ROBOT_ID = "spm-exec-1"
 
-STRATEGY_VERSION = "3.0.9-manual-gate"
+STRATEGY_VERSION = "3.0.12-manual-gate"
 RUN_PROFILE = "TEST"              # TEST=force dry-run gates off; LIVE=use ALLOW_* gates
+
+# ===== VRP_CONTEXT 数据源（仅检查有效性，不做旧价格门控）=====
+GEX_CONTEXT_API_BASE = "http://13.231.16.198:8000"
+GEX_CONTEXT_API_KEY = "7WkM4LBAha7di0KMCtgty3NwdQcNXI5-j3o8MymkGiE"
+GEX_CONTEXT_TIMEOUT_SECONDS = 5
 
 # ===== 人工审计门输入（手填）=====
 # MANUAL_PLANNING_ALLOWED=False 时只等待人工审计门，不生成可执行确认码。

@@ -120,6 +120,16 @@ def test_console_surfaces_manage_in_flight_orders():
     assert "exit-working" in rows["活动订单"]
 
 
+def test_console_surfaces_hedge_position_data_gap():
+    ctx = _ctx()
+    ctx.update(console_phase="POSITION_MANAGE",
+               hedge_data_gap="HEDGE_POSITION_DATA_GAP")
+    tables = _tables_from_panel(D.disp_status_panel(ctx, "测试"))
+    rows = {r[0]: r[1] for r in tables[0]["rows"]}
+    assert "HEDGE_POSITION_DATA_GAP" in rows["对冲数据"]
+    assert "禁新增对冲" in rows["对冲数据"]
+
+
 def test_console_kill_hint_overrides():
     ctx = _ctx(); ctx.update(kill_new_risk=True, console_phase="POSITION_MANAGE")
     assert "急停" in D.disp_operation_hint(ctx)

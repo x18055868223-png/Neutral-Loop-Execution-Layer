@@ -17,7 +17,8 @@ from gates import gate_decision, ACTION_ENTRY
 from deribit_io import (dbt_ticker, dbt_get_instrument, dbt_place_order,
                        dbt_get_order_state, dbt_cancel)
 from binance_io import bnc_place_hedge
-from accounting import acct_option_fee_ccy
+from accounting import (acct_option_fee_ccy, acct_mark_slippage,
+                        acct_chase_cost, acct_spread_cost)
 from position import entry_credit_capped_index, entry_net_credit
 from fmz_shim import Log, Sleep
 
@@ -33,25 +34,49 @@ def _round_to_tick(price, tick, mode):
     return round(n * tick, 10)
 
 
-def exec_buy_price(mark, best_ask, tick, step):
+def _float_or_none(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def exec_effective_tick(meta, price):
+    tick = _float_or_none((meta or {}).get("tick_size")) or 0.0
+    pval = _float_or_none(price)
+    for st in ((meta or {}).get("tick_size_steps") or []):
+        above = _float_or_none((st or {}).get("above_price"))
+        step = _float_or_none((st or {}).get("tick_size"))
+        if pval is not None and above is not None and step and pval >= above:
+            tick = step
+    return tick
+
+
+def exec_round_order_price(side, price, meta, tick=None):
+    eff_tick = exec_effective_tick(meta, price) or tick or 0.0
+    mode = "down" if side == "buy" else "up"
+    return _round_to_tick(price, eff_tick, mode)
+
+
+def exec_buy_price(mark, best_ask, tick, step, meta=None):
     """买 protection：step0=min(mark,ask-tick)；每追一步 +tick，封顶 ask-tick。"""
     cap = best_ask - tick
     base = min(mark, cap)
     p = base + step * tick
-    return _round_to_tick(min(p, cap), tick, "down")
+    return exec_round_order_price("buy", min(p, cap), meta, tick)
 
 
-def exec_sell_price(mark, best_bid, tick, step):
+def exec_sell_price(mark, best_bid, tick, step, meta=None):
     """卖 short：step0=max(mark,bid+tick)；每追一步 -tick，封底 bid+tick。"""
     floor_p = best_bid + tick
     base = max(mark, floor_p)
     p = base - step * tick
-    return _round_to_tick(max(p, floor_p), tick, "up")
+    return exec_round_order_price("sell", max(p, floor_p), meta, tick)
 
 
-def exec_price_for(side, mark, best_bid, best_ask, tick, step):
-    return (exec_buy_price(mark, best_ask, tick, step) if side == "buy"
-            else exec_sell_price(mark, best_bid, tick, step))
+def exec_price_for(side, mark, best_bid, best_ask, tick, step, meta=None):
+    return (exec_buy_price(mark, best_ask, tick, step, meta) if side == "buy"
+            else exec_sell_price(mark, best_bid, tick, step, meta))
 
 
 # ---------- 行情快照 ----------
@@ -62,12 +87,14 @@ def exec_quote(instrument):
     meta = dbt_get_instrument(instrument)
     if not t or not meta:
         return None
+    mark = t.get("mark_price")
     return {
-        "mark": t.get("mark_price"),
+        "mark": mark,
         "mark_iv": t.get("mark_iv"),
         "best_bid": t.get("best_bid_price"),
         "best_ask": t.get("best_ask_price"),
-        "tick": meta.get("tick_size"),
+        "tick": exec_effective_tick(meta, mark),
+        "meta": meta,
         "underlying": t.get("underlying_price"),
         "delta": (t.get("greeks") or {}).get("delta"),
         "gamma": (t.get("greeks") or {}).get("gamma"),
@@ -90,7 +117,7 @@ def exec_plan_prices(side, instrument, amount):
     q = exec_quote(instrument)
     if not q or q.get("best_bid") is None or q.get("best_ask") is None:
         return {"instrument": instrument, "side": side, "amount": amount, "prices": [], "quote": q}
-    prices = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s)
+    prices = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s, q.get("meta"))
               for s in range(MAX_CHASE_STEPS + 1)]
     return {"instrument": instrument, "side": side, "amount": amount, "prices": prices,
             "mark": q.get("mark"), "best_bid": q.get("best_bid"), "best_ask": q.get("best_ask"),
@@ -101,6 +128,51 @@ def _extract_order(resp):
     if not resp:
         return None
     return resp.get("order") if isinstance(resp, dict) and "order" in resp else resp
+
+
+def _exec_num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _order_fee(order):
+    if not isinstance(order, dict):
+        return None
+    for k in ("commission", "fee", "fees", "Fee", "Commission"):
+        v = _exec_num(order.get(k))
+        if v is not None:
+            return float(v)
+    return None
+
+
+def _execution_detail(leg, side, instrument, amount, intended_price, final_price,
+                      filled, avg_price, order_id, quote, cancelled=False,
+                      remaining=None, order=None):
+    filled = filled or 0.0
+    avg_price = avg_price if avg_price is not None else final_price
+    q = quote or {}
+    fee_actual = _order_fee(order)
+    fee_est = acct_option_fee_ccy(avg_price or 0.0, filled) if filled > 0 else 0.0
+    spread = acct_spread_cost(q.get("best_bid"), q.get("best_ask"), filled)
+    mark_slip = (acct_mark_slippage(side, avg_price, q.get("mark"), filled)
+                 if filled > 0 and avg_price is not None and q.get("mark") is not None else None)
+    chase = (acct_chase_cost(side, intended_price, avg_price, filled)
+             if filled > 0 and intended_price is not None and avg_price is not None else None)
+    return {
+        "leg": leg, "side": side, "instrument": instrument,
+        "amount": amount, "filled": filled,
+        "intended_price": intended_price, "final_price": final_price,
+        "avg_price": avg_price, "order_id": order_id,
+        "remaining": max(0.0, (amount or 0.0) - filled) if remaining is None else remaining,
+        "cancelled": bool(cancelled),
+        "quote_mark": q.get("mark"), "quote_bid": q.get("best_bid"),
+        "quote_ask": q.get("best_ask"), "quote_tick": q.get("tick"),
+        "spread_cost_estimate": spread,
+        "mark_slippage": mark_slip,
+        "chase_slippage": chase,
+        "fee_actual": fee_actual,
+        "fee_estimate": fee_est,
+        "fee_used": fee_actual if fee_actual is not None else fee_est,
+    }
 
 
 # ---------- maker-only 成交（只追一步）----------
@@ -114,14 +186,14 @@ def exec_maker_only_fill(side, instrument, target_amount, label=None):
         Log("[exec] 盘口缺失，跳过:", instrument)
         return {"filled": 0.0, "dry": False, "quote": q, "reason": "NO_QUOTE"}
 
-    price0 = exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], 0)
+    price0 = exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], 0, q.get("meta"))
     # 进场门控（ENTRY）：exec_open_structure 为唯一调用方；退出/对冲执行器后续各自传专属门控
     gates = effective_trading_gates(RUN_PROFILE, ALLOW_ENTRY_TRADING, False, False)
     live = gate_decision(ACTION_ENTRY, gates["allow_entry"], False, False,
                          KILL_NEW_RISK, EMERGENCY_REDUCE_ONLY)["allowed"]
 
     if not live:
-        intents = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s)
+        intents = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s, q.get("meta"))
                    for s in range(MAX_CHASE_STEPS + 1)]
         Log("[exec][DRY] 意图 %s %s amt=%s 计划价(含追价)=%s 盘口=%s/%s mark=%s" %
             (side, instrument, target_amount, intents, q["best_bid"], q["best_ask"], q["mark"]))
@@ -143,7 +215,7 @@ def exec_maker_only_fill(side, instrument, target_amount, label=None):
         remaining = target_amount - filled
         if remaining <= 0:
             break
-        price = exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], step)
+        price = exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], step, q.get("meta"))
         final_price = price
         steps_used = step
         resp = dbt_place_order(side, instrument, remaining, price,
@@ -202,25 +274,41 @@ def exec_open_structure(short_instrument, protection_instrument, amount):
 
 # ---------- 开仓活动（entry campaign）：跨轮持久 maker、信用底线约束、保护腿先成交 ----------
 
-def _post_maker_once(side, instrument, amount, price, label):
+def _post_maker_once(side, instrument, amount, price, label, meta=None, quote=None, leg=None):
     """单次 post-only 挂单(给定价)，等一周期，查成交，撤未成交后再查捕捉晚到成交。返回 filled。"""
     if not amount or amount <= 0 or price is None or price <= 0:
-        return 0.0
+        return _execution_detail(leg or label, side, instrument, amount, price, price,
+                                 0.0, None, None, quote)
+    intended_price = price
+    meta = meta or dbt_get_instrument(instrument) or {}
+    rounded = exec_round_order_price(side, price, meta)
+    if rounded != price:
+        Log("[exec][round] leg=%s raw_price=%s rounded_price=%s tick=%s" %
+            (side, price, rounded, exec_effective_tick(meta, price)))
+        price = rounded
     resp = dbt_place_order(side, instrument, amount, price,
                            post_only=True, reject_post_only=True, label=label)
     order = _extract_order(resp)
     if order is None:
-        return 0.0
+        return _execution_detail(leg or label, side, instrument, amount,
+                                 intended_price, price, 0.0, None, None, quote)
     oid = order.get("order_id")
     Sleep(int(CHASE_WAIT_SECONDS * 1000))
     st = _extract_order(dbt_get_order_state(oid)) or order
     filled = st.get("filled_amount") or 0.0
+    avg = st.get("average_price") or price
+    cancelled = False
     if st.get("order_state") not in ("filled",) and (amount - filled) > 0:
         dbt_cancel(oid)
+        cancelled = True
         st2 = _extract_order(dbt_get_order_state(oid)) or st
         if (st2.get("filled_amount") or 0.0) > filled:
             filled = st2.get("filled_amount")
-    return filled
+            avg = st2.get("average_price") or avg
+            st = st2
+    return _execution_detail(leg or label, side, instrument, amount,
+                             intended_price, price, filled, avg, oid, quote,
+                             cancelled=cancelled, order=st)
 
 
 def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_tick_steps,
@@ -236,8 +324,10 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
         return {"quotes_ok": False, "credit_ok": False, "dry": (not allow_live),
                 "prot_fill": 0.0, "short_fill": 0.0, "reason": "NO_QUOTE"}
     steps = max(0, int(max_tick_steps))
-    prot_buy_prices = [exec_buy_price(pq["mark"], pq["best_ask"], pq["tick"], n) for n in range(steps + 1)]
-    short_sell_prices = [exec_sell_price(sq["mark"], sq["best_bid"], sq["tick"], n) for n in range(steps + 1)]
+    prot_buy_prices = [exec_buy_price(pq["mark"], pq["best_ask"], pq["tick"], n, pq.get("meta"))
+                       for n in range(steps + 1)]
+    short_sell_prices = [exec_sell_price(sq["mark"], sq["best_bid"], sq["tick"], n, sq.get("meta"))
+                         for n in range(steps + 1)]
     fees = acct_option_fee_ccy(pq["mark"], amount) + acct_option_fee_ccy(sq["mark"], amount)
     i_cap = entry_credit_capped_index(prot_buy_prices, short_sell_prices, amount, fees, credit_floor)
     if i_cap < 0:
@@ -251,17 +341,37 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
         return {"quotes_ok": True, "credit_ok": True, "dry": True, "prot_price": prot_price,
                 "short_price": short_price, "net_credit": net_credit, "n_used": n,
                 "prot_fill": 0.0, "short_fill": 0.0, "reason": "ENTRY_DRYRUN"}
-    prot_fill = 0.0
+    prot_detail = _execution_detail("protection", "buy", prot_inst, 0.0,
+                                    prot_price, prot_price, 0.0, None, None, pq)
     if (prot_done_qty or 0.0) < amount - 1e-12:                 # 保护腿先成交（持久重挂）
-        prot_fill = _post_maker_once("buy", prot_inst, amount - (prot_done_qty or 0.0),
-                                     prot_price, label + "_prot")
+        prot_detail = _post_maker_once("buy", prot_inst, amount - (prot_done_qty or 0.0),
+                                       prot_price, label + "_prot", pq.get("meta"),
+                                       quote=pq, leg="protection")
+    prot_fill = prot_detail.get("filled") or 0.0
     short_cap = min(amount, (prot_done_qty or 0.0) + prot_fill) - (short_done_qty or 0.0)
-    short_fill = 0.0
+    short_detail = _execution_detail("short", "sell", short_inst, 0.0,
+                                     short_price, short_price, 0.0, None, None, sq)
     if short_cap > 1e-12:                                       # 短腿数量 ≤ 已成交保护腿量
-        short_fill = _post_maker_once("sell", short_inst, short_cap, short_price, label + "_short")
+        short_detail = _post_maker_once("sell", short_inst, short_cap, short_price,
+                                        label + "_short", sq.get("meta"),
+                                        quote=sq, leg="short")
+    short_fill = short_detail.get("filled") or 0.0
+    fills = [d for d in (prot_detail, short_detail)
+             if (d.get("filled") or 0.0) > 0 or d.get("order_id")]
+    prot_avg = prot_detail.get("avg_price") if prot_fill > 0 else None
+    short_avg = short_detail.get("avg_price") if short_fill > 0 else None
+    fee_used = sum((d.get("fee_used") or 0.0) for d in fills)
+    actual_before = ((short_avg or 0.0) * short_fill
+                     - (prot_avg or 0.0) * prot_fill)
+    actual_after = actual_before - fee_used
     return {"quotes_ok": True, "credit_ok": True, "dry": False, "prot_price": prot_price,
             "short_price": short_price, "net_credit": net_credit, "n_used": n,
-            "prot_fill": prot_fill, "short_fill": short_fill, "reason": "ENTRY_STEP"}
+            "prot_fill": prot_fill, "short_fill": short_fill,
+            "prot_avg_price": prot_avg, "short_avg_price": short_avg,
+            "entry_fees": fee_used,
+            "actual_net_credit_before_fees": actual_before,
+            "actual_net_credit_after_fees": actual_after,
+            "fills": fills, "reason": "ENTRY_STEP"}
 
 
 # ---------- 低成本退出：买回卖方短腿（§7.3；每轮一次、价格 ≤ 预算上限、post-only）----------
@@ -300,14 +410,19 @@ def exec_exit_buyback_step(short_instrument, target_amount, price_cap, allow_liv
     st = _extract_order(dbt_get_order_state(oid)) or order
     filled = st.get("filled_amount") or 0.0
     avg = st.get("average_price") or price
+    cancelled = False
     if st.get("order_state") not in ("filled",) and (target_amount - filled) > 0:
         dbt_cancel(oid)
+        cancelled = True
         st2 = _extract_order(dbt_get_order_state(oid)) or st        # 撤单后再查，捕捉晚到成交
         if (st2.get("filled_amount") or 0.0) > filled:
             filled = st2.get("filled_amount")
             avg = st2.get("average_price") or avg
+    detail = _execution_detail("exit_short", "buy", short_instrument, target_amount,
+                               price, price, filled, avg, oid, q,
+                               cancelled=cancelled, order=st)
     return {"filled": filled, "avg_price": avg, "dry": False, "price": price,
-            "taker": allow_taker, "reason": "EXIT_STEP"}
+            "taker": allow_taker, "reason": "EXIT_STEP", **detail}
 
 
 # ---------- 保护腿回收（§7.5；短腿归零后 maker 卖出；无 bid → LONG_RESIDUAL_ONLY）----------
@@ -327,8 +442,10 @@ def exec_protection_recovery_step(long_inst, qty, allow_live, label="recover_lon
     price = bid                                    # 被动 maker 卖：join bid（不接受负净回收 → bid>0 已保证）
     if not allow_live:
         return {"sold": 0.0, "dry": True, "price": price, "state": "WORKING_LONG", "reason": "RECOVER_DRYRUN"}
-    sold = _post_maker_once("sell", long_inst, qty, price, label)
-    return {"sold": sold, "price": price, "dry": False,
+    detail = _post_maker_once("sell", long_inst, qty, price, label, quote=q, leg="recover_long")
+    sold = detail.get("filled") or 0.0
+    return {"sold": sold, "price": price, "avg_price": detail.get("avg_price"),
+            "dry": False, "execution": detail,
             "state": ("COMPLETE" if sold >= qty - 1e-12 else "WORKING_LONG"), "reason": "RECOVER_STEP"}
 
 

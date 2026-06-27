@@ -38,6 +38,8 @@ def manual_context_hash(ctx):
         "audit_reference": ctx.get("audit_reference") or {},
         "planning_scope": ctx.get("planning_scope") or {},
         "risk_policy": ctx.get("risk_policy") or {},
+        "market_context": ctx.get("market_context") or {},
+        "vrp_context_status": ctx.get("vrp_context_status"),
     }
     return _hash(material)
 
@@ -64,7 +66,7 @@ def manual_config_signature(planning_allowed, direction_bias, dte_hours, delta_r
 
 def build_manual_context(now_ms, planning_allowed, direction_bias, dte_hours, delta_range,
                          width_range, amount, audit_card_id, audit_note, ttl_min,
-                         risk_policy=None):
+                         risk_policy=None, market_context=None, vrp_context_status=None):
     dte_min, dte_max = _pair(dte_hours)
     delta_min, delta_max = _pair(delta_range)
     width_min, width_max = _pair(width_range)
@@ -95,6 +97,8 @@ def build_manual_context(now_ms, planning_allowed, direction_bias, dte_hours, de
             "amount": amount,
         },
         "risk_policy": risk_policy or {},
+        "market_context": market_context or {},
+        "vrp_context_status": vrp_context_status,
     }
 
 

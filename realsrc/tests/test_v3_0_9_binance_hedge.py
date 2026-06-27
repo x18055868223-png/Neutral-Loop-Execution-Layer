@@ -16,7 +16,8 @@ _ORIG_ST = {k: getattr(ST, k, _MISSING) for k in (
     "KILL_NEW_RISK", "EMERGENCY_REDUCE_ONLY", "HEDGE_VENUE", "HEDGE_BINANCE_INSTRUMENT",
     "HEDGE_BINANCE_EXCHANGE_INDEX", "HEDGE_REDUCTION_RATIO", "HEDGE_MAX_SLIPPAGE_BPS",
     "dbt_get_positions", "dbt_get_open_orders", "dbt_get_instrument", "exec_hedge_step",
-    "bnc_get_position_btc", "exec_quote", "_spot_price",
+    "bnc_get_position_btc", "exec_quote", "_spot_price", "_evaluate_hedge",
+    "_evaluate_position_risk_now", "_evaluate_take_profit",
 )}
 
 
@@ -177,4 +178,46 @@ def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized(
     assert out["arb"]["executable_action"] == "HEDGE_READY"
     assert calls and calls[0][0][0]["venue"] == "BINANCE"
     assert calls[0][1]["execution_style"] == "PROMPT_LIMIT"
+    _restore()
+
+
+def test_manage_cycle_allows_existing_hedge_reduce_when_hedge_gate_off():
+    ST.RUN_PROFILE = "LIVE"
+    ST.ALLOW_ENTRY_TRADING = False
+    ST.ALLOW_EXIT_TRADING = True
+    ST.ALLOW_HEDGE_TRADING = False
+    ST.KILL_NEW_RISK = False
+    ST.EMERGENCY_REDUCE_ONLY = False
+    fmz_shim._G(ST._POSITION_KEY, {
+        "position_id": "pos-reduce", "side": "CALL", "short_instrument": "S",
+        "long_instrument": "P", "remaining_short_qty": 0.10, "long_remaining_qty": 0.10,
+        "entry_profit_ceiling_net": 0.001, "max_total_exit_spend": 0.0002,
+        "realized_exit_spend": 0.0,
+    })
+    ST.dbt_get_positions = lambda *_a: []
+    ST.dbt_get_open_orders = lambda *_a: []
+    ST._evaluate_take_profit = lambda *_a, **_k: {
+        "qualified": False, "remaining_short_qty": 0.10,
+        "remaining_budget": 0.0001, "price_cap": 0.001, "quote_ok": True,
+        "ratio": 0.0,
+    }
+    ST._evaluate_hedge = lambda *_a, **_k: {
+        "perp_qty": 0.02, "target": 0.01, "orphan": False, "side": "sell",
+        "venue": "BINANCE", "instrument": "BTCUSDC",
+        "venue_cfg": {"venue": "BINANCE", "instrument": "BTCUSDC", "linear": True, "exchange_index": 1},
+        "action": {"action": "HEDGE_REDUCE", "reduce_only": True, "delta_contracts": 0.01},
+    }
+    ST._evaluate_position_risk_now = lambda *_a, **_k: {
+        "tail_risk_state": HR.STATE_HEDGE_READY,
+        "current_risk": {},
+        "reason_codes": ["TOUCH_PROBABILITY_DETERIORATED"],
+    }
+    calls = []
+    ST.exec_hedge_step = lambda *a, **k: calls.append((a, k)) or {
+        "filled": 0.0, "dry": True, "reason": "HEDGE_DRYRUN"}
+
+    out = ST.manage_cycle(1000000)
+
+    assert out["arb"]["executable_action"] == "HEDGE_READY"
+    assert calls and calls[0][0][3] is True
     _restore()

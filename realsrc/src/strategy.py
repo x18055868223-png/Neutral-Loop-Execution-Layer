@@ -10,7 +10,9 @@ run_cycle() 主链：
 约定：本项目内一律用「裸名 + 模块前缀」，合成单文件后位于同一命名空间，bundle 仅剥离项目内 import。
 """
 
+import json
 import time
+import urllib.request
 
 from config import *
 from fmz_shim import _G, Log, LogStatus, Sleep, GetCommand
@@ -45,7 +47,6 @@ from display import *
 from hedge_risk import (build_entry_risk_anchor, build_hedge_trigger_policy,
                        evaluate_position_risk,
                        STATE_EXIT_PREFERRED, STATE_HEDGE_READY)
-from vrp_gate import apply_vrp_gate, gate_plan
 from risk_controls import (evaluate_portfolio_budget, evaluate_projected_budget,
                           unified_action_arbiter)
 from execution_feasibility import (evaluate_execution_feasibility,
@@ -53,6 +54,7 @@ from execution_feasibility import (evaluate_execution_feasibility,
 
 _MENU_KEY = "spm_plan_menu_v1"
 _MANUAL_CONTEXT_KEY = "spm_manual_context_v1"
+_LAST_COMMAND_KEY = "spm_last_command_v1"
 _LAST = {"plan_ms": 0}
 # 选用方案明细锁定：启动时锁定一个方案的编号，之后不随方案库刷新而改变（重启复位）
 _LOCKED = {"detail_id": None}
@@ -91,6 +93,59 @@ def _quote_cache():
             return q
         return cache[inst]
     return fn
+
+
+def _num_or_none(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def fetch_gex_vrp_context(direction_bias, base_url=None, api_key=None, timeout=None):
+    """Fetch lightweight IV/RV rank context. This is a data-validity check only."""
+    try:
+        base = (base_url or GEX_CONTEXT_API_BASE).rstrip("/")
+        key = api_key if api_key is not None else GEX_CONTEXT_API_KEY
+        req = urllib.request.Request(base + "/v1/info")
+        if key:
+            req.add_header("Authorization", "Bearer " + str(key))
+        with urllib.request.urlopen(req, timeout=timeout or GEX_CONTEXT_TIMEOUT_SECONDS) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if payload.get("stale"):
+            return {"valid": False, "status": "VRP_CONTEXT_STALE", "market_context": None,
+                    "raw": payload}
+        if payload.get("availability") not in (None, "ready"):
+            return {"valid": False, "status": "VRP_CONTEXT_UNAVAILABLE", "market_context": None,
+                    "raw": payload}
+        if payload.get("missing_fields"):
+            return {"valid": False, "status": "VRP_CONTEXT_MISSING_FIELDS",
+                    "market_context": None, "raw": payload}
+        ratio = _num_or_none(((payload.get("volatility") or {}).get("iv_rv_ratio")))
+        metric = (((payload.get("rank") or {}).get("metrics") or {})
+                  .get("volatility.iv_rv_ratio") or {})
+        rank_pct = _num_or_none(metric.get("rank_pct"))
+        if rank_pct is None and _num_or_none(metric.get("percentile")) is not None:
+            rank_pct = metric.get("percentile") * 100.0
+        if ratio is None or rank_pct is None:
+            return {"valid": False, "status": "VRP_CONTEXT_INVALID", "market_context": None,
+                    "raw": payload}
+        mc = {
+            "source": "GEX_MONITOR_IV_RV_RANK",
+            "side": direction_bias,
+            "iv_rv_ratio": ratio,
+            "iv_rv_rank_pct": rank_pct,
+            "sample_count": metric.get("sample_count"),
+            "quality": metric.get("quality"),
+            "asset": payload.get("asset"),
+            "fetched_at": payload.get("fetched_at"),
+        }
+        return {"valid": True, "status": "VRP_CONTEXT_VALID", "market_context": mc,
+                "raw": payload}
+    except Exception as exc:
+        return {"valid": False, "status": "VRP_CONTEXT_API_ERROR:%s" % exc,
+                "market_context": None}
+
+
+def _is_gex_vrp_context(mc):
+    return (mc or {}).get("source") == "GEX_MONITOR_IV_RV_RANK"
 
 
 def _first_in_width(prots, width_range=None):
@@ -233,7 +288,7 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
 
 def _ctx_base(state, spot, reason=None):
     profile = normalize_run_profile(RUN_PROFILE)
-    return {
+    snap = {
         "version": STRATEGY_VERSION,
         "run_profile": profile,
         "live_checklist_missing": live_checklist_missing(
@@ -250,6 +305,7 @@ def _ctx_base(state, spot, reason=None):
         "reason": reason, "spot": spot, "amount": ORDER_AMOUNT,
         "selected_plan": SELECTED_PLAN, "protection_mode": None,
     }
+    return snap
 
 
 def _flat_plan_fields(p):
@@ -317,13 +373,18 @@ def integrated_plan_preview(spot, market_context=None, portfolio_state=None):
     if reason != "OK" or not menu:
         out["lockable"] = []
         return out
-    # PRICE_GATE：VRP 双门（独立 AND 硬门；BLOCK 不进可锁定方案）
+    # VRP_CONTEXT: GEX path is validity-only; legacy price gate stays source-test only.
     if market_context:
-        passed, blocked = apply_vrp_gate(menu, market_context)
-        out["vrp_passed"] = [p for p, _g in passed]
-        out["vrp_blocked"] = [{"id": p.get("id"), "reason_codes": g["reason_codes"]}
-                              for p, g in blocked]
-        out["lockable"] = list(out["vrp_passed"])
+        mc = _plan_vrp_context({"market_context": market_context}, DIRECTION_BIAS)
+        if mc:
+            out["vrp_passed"] = list(menu)
+            out["vrp_blocked"] = []
+            out["lockable"] = list(menu)
+        else:
+            out["vrp_passed"] = []
+            out["vrp_blocked"] = [{"id": p.get("id"), "reason_codes": ["VRP_CONTEXT_UNSUPPORTED"]}
+                                  for p in menu]
+            out["lockable"] = []
     else:
         out["not_lockable_reason"] = "VRP_CONTEXT_MISSING"
     # 组合硬预算（缺口2，入场前额外 AND 门；占位安全：超即 size=0 → 无可锁定）
@@ -343,22 +404,23 @@ def _plan_vrp_context(verdict, direction_bias):
         return None
     if not mc.get("side"):
         mc["side"] = direction_bias
-    required = ("front_anchor_iv", "rv_24h", "rv_72h", "rv_7d",
-                "executable_short_iv")
-    return mc if all(mc.get(k) is not None for k in required) else None
+    if _is_gex_vrp_context(mc):
+        return mc if (mc.get("iv_rv_ratio") is not None
+                      and mc.get("iv_rv_rank_pct") is not None) else None
+    return None
 
 
 def _filter_menu_by_vrp(menu, verdict, direction_bias, diag=None):
     mc = _plan_vrp_context(verdict, direction_bias)
     if not (menu and mc):
         return menu, 0
-    try:
-        passed, blocked = apply_vrp_gate(menu, mc)
-    except Exception:
-        return [], len(menu)
+    if _is_gex_vrp_context(mc):
+        if diag is not None:
+            diag["VRP阻断"] = 0
+        return menu, 0
     if diag is not None:
-        diag["VRP阻断"] = len(blocked)
-    return [p for p, _g in passed], len(blocked)
+        diag["VRP阻断"] = len(menu)
+    return [], len(menu)
 
 
 # ---------- 下单轮 ----------
@@ -426,6 +488,24 @@ def _manual_context_signature():
         MANUAL_AUDIT_NOTE, MANUAL_CONTEXT_TTL_MIN, _manual_risk_policy())
 
 
+def _refresh_vrp_context(ctx, now_ms):
+    if not ctx:
+        return ctx
+    if ctx.get("market_context") and ctx.get("vrp_context_status") != "VRP_CONTEXT_VALID":
+        ctx["vrp_context_status"] = "VRP_CONTEXT_VALID"
+        ctx["vrp_context_checked_ts_ms"] = now_ms
+        return ctx
+    last = ctx.get("vrp_context_checked_ts_ms") or 0
+    if (ctx.get("vrp_context_status") == "VRP_CONTEXT_VALID"
+            and now_ms - last < PLAN_REFRESH_SECONDS * 1000):
+        return ctx
+    verdict = fetch_gex_vrp_context(ctx.get("direction_bias") or DIRECTION_BIAS)
+    ctx["market_context"] = verdict.get("market_context") or {}
+    ctx["vrp_context_status"] = verdict.get("status")
+    ctx["vrp_context_checked_ts_ms"] = now_ms
+    return ctx
+
+
 def _manual_context_for_cycle(now_ms):
     if not MANUAL_PLANNING_ALLOWED:
         return None
@@ -438,6 +518,8 @@ def _manual_context_for_cycle(now_ms):
             MANUAL_AUDIT_CARD_ID, MANUAL_AUDIT_NOTE, MANUAL_CONTEXT_TTL_MIN,
             _manual_risk_policy())
         _G(_MANUAL_CONTEXT_KEY, ctx)
+    ctx = _refresh_vrp_context(ctx, now_ms)
+    _G(_MANUAL_CONTEXT_KEY, ctx)
     return ctx
 
 
@@ -557,12 +639,22 @@ def _dispatch_command(raw, meta, now_ms):
         return {"action": None, "status": status}
     if status == "UNKNOWN":
         cmd_ledger_record(cmd, None, "UNKNOWN", "ignored", now_ms)
+        _G(_LAST_COMMAND_KEY, {"raw": cmd.get("raw"), "arg": cmd.get("arg"),
+                               "type": cmd.get("type"), "status": status,
+                               "outcome": "ignored", "ts": now_ms})
         return {"action": "UNKNOWN", "status": status}
     if status == "DUPLICATE":
         cmd_ledger_record(cmd, res["key"], "DUPLICATE", "ignored", now_ms)
+        _G(_LAST_COMMAND_KEY, {"raw": cmd.get("raw"), "arg": cmd.get("arg"),
+                               "type": cmd.get("type"), "status": status,
+                               "outcome": "duplicate_ignored", "key": res.get("key"),
+                               "ts": now_ms})
         return {"action": cmd["type"], "status": status, "outcome": "duplicate_ignored"}
     outcome = _handle_command(cmd["type"], cmd, now_ms)
     cmd_ledger_record(cmd, res["key"], "ACCEPTED", outcome, now_ms)
+    _G(_LAST_COMMAND_KEY, {"raw": cmd.get("raw"), "arg": cmd.get("arg"),
+                           "type": cmd.get("type"), "status": status,
+                           "outcome": outcome, "key": res.get("key"), "ts": now_ms})
     return {"action": cmd["type"], "status": status, "outcome": outcome}
 
 
@@ -626,25 +718,14 @@ def _vrp_recheck_locked(locked, spot, amount, short_quote, protection_quote, man
         return None, None
     if not mc.get("side"):
         mc["side"] = _side_to_direction_bias((locked or {}).get("side"))
-    plan = {
-        "spot": spot,
-        "short_strike": locked.get("short_strike"),
-        "protection_strike": locked.get("long_strike"),
-        "short_dte_hours": locked.get("short_dte_hours"),
-        "amount": amount,
-        "short_bid": (short_quote or {}).get("best_bid"),
-        "short_ask": (short_quote or {}).get("best_ask"),
-        "protection_bid": (protection_quote or {}).get("best_bid"),
-        "protection_ask": (protection_quote or {}).get("best_ask"),
-        "short_instrument": locked.get("short_instrument"),
-        "protection_instrument": locked.get("long_instrument"),
-        "short_delta": locked.get("short_delta"),
-    }
-    try:
-        gate = gate_plan(plan, mc)
-    except Exception as exc:
-        return None, {"error": str(exc)}
-    return bool(gate.get("pass")), gate
+    if _is_gex_vrp_context(mc):
+        valid = (mc.get("iv_rv_ratio") is not None and mc.get("iv_rv_rank_pct") is not None)
+        return valid, {"pass": valid,
+                       "status": (manual_context or {}).get("vrp_context_status"),
+                       "source": mc.get("source"),
+                       "iv_rv_ratio": mc.get("iv_rv_ratio"),
+                       "iv_rv_rank_pct": mc.get("iv_rv_rank_pct")}
+    return None, {"error": "VRP_CONTEXT_UNSUPPORTED"}
 
 
 def _build_precommit_live(locked, spot, manual_context, now_ms):
@@ -740,13 +821,53 @@ def _build_entry_risk_anchor(locked, spot, now_ms):
     return anchor
 
 
+def _entry_execution_report(prog):
+    prog = prog or {}
+    fills = list(prog.get("entry_fills") or [])
+    total_fee = prog.get("entry_fee_used")
+    if total_fee is None:
+        total_fee = sum((f.get("fee_used") or f.get("fee_estimate") or 0.0) for f in fills)
+    prot_cost = prog.get("prot_cost") or 0.0
+    short_credit = prog.get("short_credit") or 0.0
+    before_fee = short_credit - prot_cost
+    return {
+        "fills": fills,
+        "fill_count": len(fills),
+        "total_fee_estimate": total_fee,
+        "total_protection_cost": prot_cost,
+        "total_short_credit": short_credit,
+        "actual_net_credit_before_fees": before_fee,
+        "actual_net_credit_after_fees": before_fee - (total_fee or 0.0),
+        "total_mark_slippage": sum((f.get("mark_slippage") or 0.0) for f in fills),
+        "total_chase_slippage": sum((f.get("chase_slippage") or 0.0) for f in fills),
+        "total_spread_cost_estimate": sum((f.get("spread_cost_estimate") or 0.0) for f in fills),
+    }
+
+
+def _attach_entry_execution_report(snap, prog):
+    if snap is not None:
+        snap["entry_execution_report"] = _entry_execution_report(prog)
+    return snap
+
+
+def _append_execution_history(snap, key, item, now_ms):
+    if not snap or not item:
+        return snap
+    hist = list(snap.get(key) or [])
+    rec = dict(item)
+    rec["ts"] = now_ms
+    hist.append(rec)
+    snap[key] = hist[-50:]
+    return snap
+
+
 def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
     """保护腿已成交、短腿未建成时的最小残值快照；复用持仓管理的保护腿回收分支。"""
     locked = locked or {}
     prog = prog or {}
     filled = prog.get("prot_done") or remaining_qty or 0.0
     avg_long = (prog.get("prot_cost") / filled) if filled > 0 else None
-    return {
+    snap = {
         "schema_name": "VerticalEntrySnapshot",
         "position_id": "pos-residual-%s" % now_ms,
         "session_id": locked.get("session_id"),
@@ -764,7 +885,7 @@ def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
         "long_instrument": locked.get("long_instrument"),
         "short_fill_amount": 0.0, "short_fill_price": None,
         "long_fill_amount": filled, "long_fill_price": avg_long,
-        "entry_fees": None, "entry_profit_ceiling_net": None,
+        "entry_fees": _entry_execution_report(prog).get("total_fee_estimate"), "entry_profit_ceiling_net": None,
         "take_profit_target_ratio": 0.80, "target_profit_amount": None,
         "max_total_exit_spend": None, "realized_exit_spend": 0.0,
         "remaining_short_qty": 0.0,
@@ -776,6 +897,7 @@ def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
         "immutable": True,
         "residual_reason": "PROTECTION_ONLY_AFTER_ENTRY_ABANDON",
     }
+    return _attach_entry_execution_report(snap, prog)
 
 
 def _block_recovery(reason):
@@ -785,17 +907,80 @@ def _block_recovery(reason):
     return verdict
 
 
-def _build_partial_vertical_snapshot(locked, prog, spot, now_ms):
+def _build_partial_vertical_snapshot(locked, prog, spot, now_ms,
+                                     abandon_reason="ENTRY_ABANDONED_AFTER_PARTIAL_SHORT"):
     short_done = prog.get("short_done") or 0.0
     prot_done = prog.get("prot_done") or 0.0
     avg_prot = (prog.get("prot_cost") / prot_done) if prot_done > 0 else None
     avg_short = (prog.get("short_credit") / short_done) if short_done > 0 else None
-    entry_fees = (acct_option_fee_ccy(avg_short or 0.0, short_done)
-                  + acct_option_fee_ccy(avg_prot or 0.0, prot_done))
-    return build_vertical_entry_snapshot(
+    entry_fees = (prog.get("entry_fee_used") if prog.get("entry_fills") else None)
+    if entry_fees is None:
+        entry_fees = (acct_option_fee_ccy(avg_short or 0.0, short_done)
+                      + acct_option_fee_ccy(avg_prot or 0.0, prot_done))
+    snap = build_vertical_entry_snapshot(
         locked, {"filled": short_done, "avg_price": avg_short},
         {"filled": prot_done, "avg_price": avg_prot}, entry_fees, now_ms,
         entry_risk_anchor=_build_entry_risk_anchor(locked, spot, now_ms))
+    snap["entry_completion_state"] = "PARTIAL_VERTICAL"
+    snap["entry_abandon_reason"] = abandon_reason
+    snap["entry_target_amount"] = locked.get("amount") or ORDER_AMOUNT
+    snap["entry_attempts"] = prog.get("attempts") or 0
+    return _attach_entry_execution_report(snap, prog)
+
+
+def _has_entry_progress(prog):
+    prog = prog or {}
+    return ((prog.get("prot_done") or 0.0) > 1e-12
+            or (prog.get("short_done") or 0.0) > 1e-12)
+
+
+def _adopt_entry_progress_or_block(locked, prog, spot, now_ms, reason):
+    prog = prog or {}
+    prot_done = prog.get("prot_done") or 0.0
+    short_done = prog.get("short_done") or 0.0
+    if short_done > prot_done + 1e-12:
+        _block_recovery("ENTRY_SHORT_GT_PROTECTION")
+        return {"adopted": False, "blocked": True,
+                "reason": "RECOVERY_BLOCKED:ENTRY_SHORT_GT_PROTECTION"}
+    if short_done > 1e-12:
+        snap = _build_partial_vertical_snapshot(locked, prog, spot, now_ms, reason)
+        _G(_POSITION_KEY, snap)
+        _G(_LOCKED_KEY, None)
+        ledger_set_state(S_SHORT_ACTIVE_PROTECTED)
+        Log("[entry][adopt] state=PARTIAL_VERTICAL short_done=%s prot_done=%s reason=%s" %
+            (short_done, prot_done, reason))
+        return {"adopted": True, "blocked": False, "snapshot": snap,
+                "position_kind": "partial",
+                "reason": "ENTRY_PARTIAL_VERTICAL_MANAGED:" + reason}
+    if prot_done > 1e-12:
+        snap = _build_protection_residual_snapshot(locked, prog, prot_done, now_ms)
+        snap["entry_completion_state"] = "PROTECTION_ONLY_RESIDUAL"
+        snap["entry_abandon_reason"] = reason
+        snap["entry_target_amount"] = (locked or {}).get("amount") or ORDER_AMOUNT
+        snap["entry_attempts"] = prog.get("attempts") or 0
+        _G(_POSITION_KEY, snap)
+        _G(_LOCKED_KEY, None)
+        ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)
+        Log("[entry][adopt] state=PROTECTION_ONLY_RESIDUAL qty=%s inst=%s reason=%s" %
+            (prot_done, (locked or {}).get("long_instrument"), reason))
+        return {"adopted": True, "blocked": False, "snapshot": snap,
+                "position_kind": "residual",
+                "reason": "ENTRY_PROTECTION_ONLY_RESIDUAL_MANAGED:" + reason}
+    return {"adopted": False, "blocked": False, "reason": "NO_ENTRY_PROGRESS"}
+
+
+def _entry_progress_explained_by_positions(locked, prog, option_positions):
+    actual = {}
+    for p in (option_positions or []):
+        inst = p.get("instrument_name")
+        if inst:
+            actual[inst] = actual.get(inst, 0.0) + abs(p.get("size") or 0.0)
+    checks = []
+    if (prog.get("prot_done") or 0.0) > 1e-12:
+        checks.append(((locked or {}).get("long_instrument"), prog.get("prot_done") or 0.0))
+    if (prog.get("short_done") or 0.0) > 1e-12:
+        checks.append(((locked or {}).get("short_instrument"), prog.get("short_done") or 0.0))
+    return bool(checks) and all(inst and actual.get(inst, 0.0) + 1e-12 >= qty for inst, qty in checks)
 
 
 def _attempt_commit(locked, spot, manual_context, now_ms):
@@ -808,17 +993,36 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
     amount = locked.get("amount") or ORDER_AMOUNT
     short_i, long_i = locked.get("short_instrument"), locked.get("long_instrument")
     prog = dict(locked.get("entry") or {"prot_done": 0.0, "short_done": 0.0, "attempts": 0,
-                                        "prot_cost": 0.0, "short_credit": 0.0})
+                                        "prot_cost": 0.0, "short_credit": 0.0,
+                                        "entry_fee_used": 0.0, "entry_fills": []})
+    prog.setdefault("entry_fee_used", 0.0)
+    prog.setdefault("entry_fills", [])
     result = {"precommit": pre, "budget": live.get("_budget"), "committed": False,
               "entry_snapshot": None, "entry_state": None, "net_credit": None, "reason": None,
               "order_intent": [
                   dict(leg="保护腿", **exec_plan_prices("buy", long_i, amount)),
                   dict(leg="卖方腿", **exec_plan_prices("sell", short_i, amount))]}
     if (prog.get("short_done") or 0.0) > (prog.get("prot_done") or 0.0) + 1e-12:
-        _block_recovery("ENTRY_SHORT_GT_PROTECTION")
-        result["reason"] = "RECOVERY_BLOCKED:ENTRY_SHORT_GT_PROTECTION"
+        adopted = _adopt_entry_progress_or_block(
+            locked, prog, spot, now_ms, "ENTRY_SHORT_GT_PROTECTION")
+        result["reason"] = adopted.get("reason")
         return result
     if not pre["passed"]:
+        if _has_entry_progress(prog):
+            adopt_reason = ("PRECOMMIT_FAILED_AFTER_PARTIAL_SHORT"
+                            if (prog.get("short_done") or 0.0) > 1e-12
+                            else "PRECOMMIT_FAILED_AFTER_ENTRY_PROGRESS:" + ",".join(pre["failed"]))
+            adopted = _adopt_entry_progress_or_block(
+                locked, prog, spot, now_ms, adopt_reason)
+            result["entry_snapshot"] = adopted.get("snapshot")
+            result["reason"] = ("ENTRY_PARTIAL_VERTICAL_MANAGED_PRECOMMIT_FAILED"
+                                if adopted.get("position_kind") == "partial"
+                                else adopted.get("reason"))
+            if adopted.get("position_kind") == "partial":
+                result["partial_position"] = True
+            if adopted.get("position_kind") == "residual":
+                result["residual_position"] = True
+            return result
         result["reason"] = "PRECOMMIT_FAILED:" + ",".join(pre["failed"])
         return result
     g = _effective_gate_cfg()
@@ -833,6 +1037,7 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
         True, step.get("quotes_ok"), step.get("credit_ok"), prog["attempts"], ENTRY_MAX_ATTEMPTS,
         prog["prot_done"] >= amount - 1e-12, prog["short_done"] >= amount - 1e-12)
     result["entry_state"] = decision["state"]
+    pf, sf = (step.get("prot_fill") or 0.0), (step.get("short_fill") or 0.0)
     if gate["allowed"] and not step.get("dry"):                  # 仅门开且真实下单时累计/计尝试
         pf, sf = (step.get("prot_fill") or 0.0), (step.get("short_fill") or 0.0)
         next_prot = min(amount, prog["prot_done"] + pf)
@@ -843,21 +1048,39 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
             return result
         prog["prot_done"] = next_prot
         prog["short_done"] = min(amount, next_short)
-        prog["prot_cost"] += pf * (step.get("prot_price") or 0.0)
-        prog["short_credit"] += sf * (step.get("short_price") or 0.0)
+        prog["prot_cost"] += pf * (step.get("prot_avg_price") or step.get("prot_price") or 0.0)
+        prog["short_credit"] += sf * (step.get("short_avg_price") or step.get("short_price") or 0.0)
+        prog["entry_fee_used"] = (prog.get("entry_fee_used") or 0.0) + (step.get("entry_fees") or 0.0)
+        prog["entry_fills"] = list(prog.get("entry_fills") or []) + list(step.get("fills") or [])
         prog["attempts"] += 1
         locked["entry"] = prog
         _G(_LOCKED_KEY, locked)
+        if _has_entry_progress(prog) and not (prog["prot_done"] >= amount - 1e-12
+                                             and prog["short_done"] >= amount - 1e-12):
+            reason = ("SHORT_NOT_FILLED_AFTER_PROTECTION"
+                      if (prog.get("short_done") or 0.0) <= 1e-12
+                      else "PARTIAL_ENTRY_PROGRESS_AFTER_STEP")
+            adopted = _adopt_entry_progress_or_block(locked, prog, spot, now_ms, reason)
+            result["entry_snapshot"] = adopted.get("snapshot")
+            result["reason"] = adopted.get("reason")
+            if adopted.get("position_kind") == "partial":
+                result["partial_position"] = True
+            if adopted.get("position_kind") == "residual":
+                result["residual_position"] = True
+            return result
     if prog["prot_done"] >= amount - 1e-12 and prog["short_done"] >= amount - 1e-12:
         avg_prot = (prog["prot_cost"] / prog["prot_done"]) if prog["prot_done"] > 0 else step.get("prot_price")
         avg_short = (prog["short_credit"] / prog["short_done"]) if prog["short_done"] > 0 else step.get("short_price")
-        entry_fees = (acct_option_fee_ccy(avg_short or 0.0, prog["short_done"])
-                      + acct_option_fee_ccy(avg_prot or 0.0, prog["prot_done"]))
+        entry_fees = (prog.get("entry_fee_used") if prog.get("entry_fills") else None)
+        if entry_fees is None:
+            entry_fees = (acct_option_fee_ccy(avg_short or 0.0, prog["short_done"])
+                          + acct_option_fee_ccy(avg_prot or 0.0, prog["prot_done"]))
         anchor = _build_entry_risk_anchor(locked, spot, now_ms)   # 冻结入场风险锚
         snap = build_vertical_entry_snapshot(
             locked, {"filled": prog["short_done"], "avg_price": avg_short},
             {"filled": prog["prot_done"], "avg_price": avg_prot}, entry_fees, now_ms,
             entry_risk_anchor=anchor)
+        _attach_entry_execution_report(snap, prog)
         _G(_POSITION_KEY, snap)
         _G(_LOCKED_KEY, None)
         ledger_set_state(S_SHORT_ACTIVE_PROTECTED)
@@ -961,10 +1184,7 @@ def _cancel_startup_entry_orders(currency):
     return after, None
 
 
-def startup_recovery_check(currency):
-    """启动恢复（P0①：以 _POSITION_KEY 入场快照为持仓真相）：读交易所真实期权/永续持仓 +
-    快照剩余短/保护腿（无快照但开仓活动在途 → 用活动进度作期望，按成交重校验）+ 真实活动订单
-    → 裁决并落 _G（恢复完成前禁开新仓）。"""
+def _read_startup_positions(currency):
     try:
         opt = dbt_get_positions(currency, "option") or []
     except Exception:
@@ -974,17 +1194,55 @@ def startup_recovery_check(currency):
     except Exception:
         perp = []
     perp_qty = sum(abs(p.get("size") or 0.0) for p in perp)
+    if HEDGE_VENUE == "BINANCE":
+        b_qty = bnc_get_position_btc(HEDGE_BINANCE_INSTRUMENT)
+        if b_qty is None:
+            return opt, None, {"state": "RECOVERY_BLOCKED",
+                               "reasons": ["HEDGE_POSITION_QUERY_FAILED"],
+                               "allow_new_open": False}
+        perp_qty = abs(b_qty)
+    return opt, perp_qty, None
+
+
+def startup_recovery_check(currency):
+    """启动恢复（P0①：以 _POSITION_KEY 入场快照为持仓真相）：读交易所真实期权/永续持仓 +
+    快照剩余短/保护腿（无快照但开仓活动在途 → 用活动进度作期望，按成交重校验）+ 真实活动订单
+    → 裁决并落 _G（恢复完成前禁开新仓）。"""
+    opt, perp_qty, read_block = _read_startup_positions(currency)
+    if read_block:
+        _G(_RECOVERY_KEY, read_block)
+        return read_block
     snap = _G(_POSITION_KEY)
+    locked = _G(_LOCKED_KEY) or {}
+    prog = {}
     short_qty = (snap or {}).get("remaining_short_qty") or 0.0
     long_qty = (snap or {}).get("long_remaining_qty") or 0.0
     if not snap:                                   # C3②：在途开仓活动按其进度作期望（与交易所成交重校验）
-        prog = (_G(_LOCKED_KEY) or {}).get("entry") or {}
+        prog = locked.get("entry") or {}
         short_qty = prog.get("short_done") or 0.0
         long_qty = prog.get("prot_done") or 0.0
     orders, entry_order_block = _cancel_startup_entry_orders(currency)
     if entry_order_block:
         _G(_RECOVERY_KEY, entry_order_block)
         return entry_order_block
+    opt, perp_qty, read_block = _read_startup_positions(currency)
+    if read_block:
+        _G(_RECOVERY_KEY, read_block)
+        return read_block
+    if (not snap) and _has_entry_progress(prog):
+        if _entry_progress_explained_by_positions(locked, prog, opt):
+            adopted = _adopt_entry_progress_or_block(
+                locked, prog, _spot_price(), _now_ms(), "STARTUP_RECOVERY_ENTRY_PROGRESS")
+            verdict = {"state": "OK", "reasons": [], "allow_new_open": True,
+                       "adopted": bool(adopted.get("adopted")),
+                       "reason": adopted.get("reason")}
+            _G(_RECOVERY_KEY, verdict)
+            return verdict
+        block = {"state": "RECOVERY_BLOCKED",
+                 "reasons": ["ENTRY_PROGRESS_NOT_MATCH_EXCHANGE"],
+                 "allow_new_open": False}
+        _G(_RECOVERY_KEY, block)
+        return block
     verdict = evaluate_startup_recovery(opt, perp_qty, short_qty, active_orders=orders,
                                         expected_long_qty=long_qty)
     _G(_RECOVERY_KEY, verdict)
@@ -1045,6 +1303,7 @@ def _apply_exit_fill(snap, step, now_ms):
     snap["remaining_short_qty"] = max(0.0, (snap.get("remaining_short_qty") or 0.0) - filled)
     snap["realized_exit_spend"] = (snap.get("realized_exit_spend") or 0.0) + price * filled + fee
     snap["last_exit_ts"] = now_ms
+    _append_execution_history(snap, "exit_execution_history", step, now_ms)
     if snap["remaining_short_qty"] <= 1e-12:
         ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)   # 短腿归零，转保护腿回收（不可直跳 CLOSED）
     _G(_POSITION_KEY, snap)
@@ -1239,7 +1498,9 @@ def manage_cycle(now_ms):
     # C2：孤儿对冲(裸 perp：short=0 而 perp≠0)清理为纯降险 reduce_only，且 perp 已存在=场所已配置 →
     #     不受 allow_hedge 阻断（缺省空跑下也能清理裸敞口）。
     orphan_cleanup = bool(hedge["orphan"] and h_reduce)
-    hedge_exec = (hedge["action"]["action"] != "HEDGE_HOLD" and (h_gate_ok or orphan_cleanup))
+    hedge_reduce_cleanup = bool(h_reduce and abs(hedge.get("perp_qty") or 0.0) > 1e-9)
+    hedge_exec = (hedge["action"]["action"] != "HEDGE_HOLD"
+                  and (h_gate_ok or orphan_cleanup or hedge_reduce_cleanup))
     pause = ("PAUSED_BY_BUDGET" if exit_state == EXIT_PAUSED_BUDGET else
              ("PAUSED_BY_DATA" if exit_state == EXIT_PAUSED_DATA else None))
     arb = unified_action_arbiter({
@@ -1270,6 +1531,9 @@ def manage_cycle(now_ms):
                                      h_reduce, allow_live=True, label="hedge",
                                      execution_style=HEDGE_OPEN_EXECUTION_STYLE,
                                      max_slippage_bps=HEDGE_MAX_SLIPPAGE_BPS)
+        if hedge_step and not hedge_step.get("dry") and snap:
+            _append_execution_history(snap, "hedge_execution_history", hedge_step, now_ms)
+            _G(_POSITION_KEY, snap)
 
     # P0② 保护腿回收（短腿归零后的清理；非风险动作，不与上面竞争）
     long_state = None
@@ -1282,6 +1546,8 @@ def manage_cycle(now_ms):
             r = exec_protection_recovery_step(li, long_rem, allow_live=True, quote=quote_fn(li))
             if (r.get("sold") or 0) > 0 and snap:
                 snap["long_remaining_qty"] = max(0.0, long_rem - r["sold"])
+                _append_execution_history(snap, "protection_recovery_history",
+                                          r.get("execution") or r, now_ms)
                 _G(_POSITION_KEY, snap)
                 long_rem = snap["long_remaining_qty"]
 
@@ -1359,12 +1625,10 @@ def run_cycle(now_ms=None):
             market_context = (manual_context or {}).get("market_context")
             lockable = []
             if reason == "OK" and menu and market_context:
-                try:
-                    passed, blocked = apply_vrp_gate(menu, market_context)
-                    lockable = [p for p, _g in passed]
-                    plan_vrp_blocked = len(blocked)
-                except Exception:
-                    plan_vrp_blocked = len(menu)
+                lockable, plan_vrp_blocked = _filter_menu_by_vrp(
+                    menu, {"market_context": market_context},
+                    manual_context.get("direction_bias") or DIRECTION_BIAS, diag)
+                if not lockable:
                     reason = "NO_VRP_PASS_CANDIDATE"
             elif reason == "OK" and menu:
                 not_lockable_reason = "VRP_CONTEXT_MISSING"
@@ -1423,6 +1687,8 @@ def run_cycle(now_ms=None):
         ctx["take_profit_ratio"] = ("%.1f%%" % (_r * 100)) if isinstance(_r, (int, float)) else "DATA_GAP"
         _h = manage_result.get("hedge")
         if _h:
+            if _h.get("data_gap"):
+                ctx["hedge_data_gap"] = _h.get("data_gap")
             _risk = manage_result.get("risk") or {}
             _cr = _risk.get("current_risk") or {}
             ctx["hedge_state"] = (
@@ -1440,6 +1706,30 @@ def run_cycle(now_ms=None):
         ctx["recovery_state"] = recovery.get("state")
     if locked and not (commit_result and commit_result.get("committed")):
         ctx["locked_plan_summary"] = "%s %s" % (locked.get("confirm_code"), locked.get("summary"))
+        ctx["preview_plan_detail"] = "locked_plan"
+        ctx["selected_id"] = locked.get("plan_id")
+        ctx["short_instrument"] = locked.get("short_instrument")
+        ctx["protection_instrument"] = locked.get("long_instrument")
+        ctx["short_strike"] = locked.get("short_strike")
+        ctx["protection_strike"] = locked.get("long_strike")
+        ctx["short_delta"] = locked.get("short_delta")
+        ctx["amount"] = locked.get("amount")
+        ctx["net_credit"] = locked.get("entry_net_credit_after_costs")
+        ctx["margin_relief_ratio"] = locked.get("margin_relief_ratio")
+        ctx["execution_feasibility_grade"] = locked.get("execution_feasibility_grade")
+        ctx["execution_feasibility_score"] = locked.get("execution_feasibility_score")
+        ctx["execution_feasibility_score_norm"] = locked.get("execution_feasibility_score_norm")
+        ctx["execution_feasibility_warnings"] = locked.get("execution_feasibility_warnings") or []
+        ctx["menu"] = [{
+            "id": locked.get("plan_id"),
+            "short_instrument": locked.get("short_instrument"),
+            "protection_instrument": locked.get("long_instrument"),
+            "short_strike": locked.get("short_strike"),
+            "protection_strike": locked.get("long_strike"),
+            "amount": locked.get("amount"),
+            "net_credit_effective": locked.get("entry_net_credit_after_costs"),
+            "margin_relief_ratio": locked.get("margin_relief_ratio"),
+        }]
     _emit(ctx, "manual-gate")
     return ctx
 

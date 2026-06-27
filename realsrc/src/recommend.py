@@ -112,6 +112,8 @@ def manual_context_hash(ctx):
         "audit_card_id": _audit_card_id(ctx),
         "risk_policy": risk_policy,
         "expires_ts_ms": ctx.get("expires_ts_ms"),
+        "market_context": ctx.get("market_context") or {},
+        "vrp_context_status": ctx.get("vrp_context_status"),
     }
     return _stable_json_hash(material)
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""R6：整合 PLAN 通顺缝端到端——真实 _build_menu → VRP 双门 → 组合硬预算 → 可锁定方案。
+"""R6：整合 PLAN 通顺缝端到端——真实 _build_menu → GEX VRP_CONTEXT → 组合硬预算 → 可锁定方案。
 
-证明执行 bundle 的主流程真正用上整合层（VRP/预算只过滤、独立 AND 门），而非模块挂着不用。
+证明执行 bundle 的主流程真正用上整合层（VRP_CONTEXT/预算只过滤、独立 AND 门），而非模块挂着不用。
 """
 import os, sys, time, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -58,11 +58,9 @@ def _setup():
     return ST
 
 
-_FAT = dict(side="SHORT_CALL", front_anchor_iv=0.92, atm_front_iv=0.90,
-            term_reference_iv_5_10d=0.86, rv_24h=0.42, rv_72h=0.40, rv_7d=0.38,
-            rv_percentile=0.50, history_days=60, executable_short_iv=0.95,
-            executable_protection_iv=0.85)
-_THIN = dict(_FAT, front_anchor_iv=0.41, atm_front_iv=0.40, term_reference_iv_5_10d=0.41)
+_GEX_VALID = dict(source="GEX_MONITOR_IV_RV_RANK", side="SHORT_CALL",
+                  iv_rv_ratio=0.8, iv_rv_rank_pct=15.2)
+_UNSUPPORTED_CONTEXT = dict(side="SHORT_CALL", front_anchor_iv=0.92, rv_24h=0.42)
 
 
 def test_no_context_displays_menu_but_is_not_lockable():
@@ -73,20 +71,20 @@ def test_no_context_displays_menu_but_is_not_lockable():
     assert out["not_lockable_reason"] == "VRP_CONTEXT_MISSING"          # 无 VRP/预算上下文 → 不生成可锁定确认码
 
 
-def test_thin_vrp_blocks_all_lockable_empty():
+def test_unsupported_vrp_context_blocks_all_lockable_empty():
     ST = _setup()
-    out = ST.integrated_plan_preview(SPOT, market_context=_THIN)
+    out = ST.integrated_plan_preview(SPOT, market_context=_UNSUPPORTED_CONTEXT)
     assert out["vrp_blocked"] and len(out["vrp_blocked"]) == len(out["menu"])
-    assert out["lockable"] == []                    # 薄 IV → VRP 全 BLOCK → 无可锁定（不开新仓）
+    assert out["lockable"] == []                    # 非 GEX 上下文不再走旧价格门控，fail-closed
     assert all(b["reason_codes"] for b in out["vrp_blocked"])
 
 
-def test_vrp_partition_complete_and_filter_applied():
+def test_gex_valid_context_makes_menu_lockable():
     ST = _setup()
-    out = ST.integrated_plan_preview(SPOT, market_context=_FAT)
+    out = ST.integrated_plan_preview(SPOT, market_context=_GEX_VALID)
     assert out["vrp_passed"] is not None and out["vrp_blocked"] is not None
     assert len(out["vrp_passed"]) + len(out["vrp_blocked"]) == len(out["menu"])  # 纯过滤、partition 完整
-    assert out["lockable"] == out["vrp_passed"]     # 可锁定 = VRP 双门 PASS 子集
+    assert out["lockable"] == out["menu"]           # GEX 只检查上下文有效性，不按旧价格门控筛选
 
 
 def test_portfolio_budget_breach_blocks_lockable():
@@ -94,6 +92,6 @@ def test_portfolio_budget_breach_blocks_lockable():
     pstate = {"current": {"open_positions": 2, "short_gamma": 0.9, "short_vega": 0.0, "margin_used": 0.0},
               "limits": {"max_open_positions": 1, "max_short_gamma": 0.5, "max_short_vega": 1.0, "max_margin": 5000.0},
               "proposed_size": 0.1}
-    out = ST.integrated_plan_preview(SPOT, market_context=_FAT, portfolio_state=pstate)
+    out = ST.integrated_plan_preview(SPOT, market_context=_GEX_VALID, portfolio_state=pstate)
     assert out["portfolio_budget"]["decision"] == "BLOCK"
     assert out["lockable"] == []                    # 组合预算超限 → 无可锁定（入场前 AND 门）

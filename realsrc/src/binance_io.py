@@ -85,6 +85,10 @@ def _cancel_order(ex, oid):
     return bool(fn(oid))
 
 
+def _missing_methods(ex, names):
+    return [name for name in names if not callable(getattr(ex, name, None))]
+
+
 def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None,
                     execution_style="PROMPT_LIMIT", max_slippage_bps=5):
     """下币安对冲腿。PROMPT_LIMIT 用盘口限价保护但不 post-only；reduce_only→平仓方向。
@@ -99,6 +103,12 @@ def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None
     ex = _ex(idx)
     if ex is None:
         return {"filled": 0.0, "dry": False, "venue": "BINANCE", "reason": "BINANCE_EXCHANGE_UNAVAILABLE"}
+    missing = _missing_methods(
+        ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell", "GetOrder", "CancelOrder"))
+    if missing:
+        return {"filled": 0.0, "dry": False, "venue": "BINANCE",
+                "reason": "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
+                "blocked": True, "missing_methods": missing}
     try:
         ex.SetContractType(symbol)
         t = ex.GetTicker() or {}

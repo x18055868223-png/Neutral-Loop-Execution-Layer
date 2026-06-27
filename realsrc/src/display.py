@@ -492,6 +492,8 @@ def disp_console_table(ctx):
     _rl = disp_risk_line(g("risk_pkg"))
     if _rl:
         rows.append(["风险", _rl])
+    if g("hedge_data_gap"):
+        rows.append(["对冲数据", "%s：无法读取对冲仓位，禁新增对冲，需人工核对" % g("hedge_data_gap")])
     if g("exit_auth_state"):
         rows.append(["软授权", g("exit_auth_state")])
     if g("take_profit_ratio") is not None:
