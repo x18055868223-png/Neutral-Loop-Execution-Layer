@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.11-manual-gate`
+- Latest completed release: `3.2.12-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -131,6 +131,16 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   assert these non-wired switches are absent. `HEDGE_EPISODE_COST_ALERT_BPS`
   remains because it is an observability threshold used by the V32 controller.
 
+## Closed In v3.2.12
+
+- [x] P1: close the remaining Deribit perpetual hedge compatibility surface
+  without touching Deribit option entry/exit/quote logic. The minimal config no
+  longer exposes `HEDGE_CONTRACT_SIZE_FALLBACK` or
+  `HEDGE_MIN_TRADE_FALLBACK`, `_evaluate_hedge()` fails closed with
+  `UNSUPPORTED_HEDGE_VENUE` for non-Binance hedge venues, and
+  `exec_hedge_step()` blocks legacy Deribit perp hedge live execution before
+  quote/order calls.
+
 ## Must Fix Next
 
 - [ ] P1: no open must-fix item currently identified beyond cleanup candidates
@@ -138,9 +148,6 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 
 ## Redundancy / Cleanup Candidates
 
-- [ ] Review the remaining Deribit hedge compatibility branch and fallback
-  sizing constants. Current config validation allows only Binance V32 for
-  minimal live hedge; do not delete Deribit option entry/exit/quote logic.
 - [ ] Clarify or rename `HEDGE_REDUCTION_RATIO` so it is not mistaken for the
   default gamma-aware full-target sizing control. It is legacy sizing context
   when gamma-aware behavior is disabled or when building entry risk anchors.

@@ -707,38 +707,8 @@ def exec_hedge_step(venue_cfg, side, amount, reduce_only, allow_live, label="hed
                 "reduce_only": reduce_only, "post_only": False,
                 "execution_style": execution_style, "blocked": True,
                 "reason": "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"}
-    # DERIBIT 反向永续
-    if not allow_live:
-        return {"filled": 0.0, "dry": True, "venue": venue, "instrument": instrument,
-                "side": side, "amount": amount, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "HEDGE_DRYRUN"}
-    q = exec_quote(instrument) or {}
-    bps = (max_slippage_bps or 0) / 10000.0
-    price = ((q.get("best_ask") or 0) * (1.0 + bps) if side == "buy"
-             else (q.get("best_bid") or 0) * (1.0 - bps))
-    if price is None or price <= 0:                       # C1：无可成交盘口 → 不下单（防 price=None 误单）
-        return {"filled": 0.0, "dry": False, "venue": venue, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "NO_QUOTE"}
-    resp = dbt_place_order(side, instrument, amount, price, post_only=False,
-                           reject_post_only=False, label=label, reduce_only=reduce_only)
-    order = _extract_order(resp)
-    if order is None:
-        return {"filled": 0.0, "dry": False, "venue": venue, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "HEDGE_ORDER_FAILED"}
-    oid = order.get("order_id")
-    Sleep(int(CHASE_WAIT_SECONDS * 1000))                 # C1：等一周期再查成交（原即查多为 0）
-    st = _extract_order(dbt_get_order_state(oid)) or order
-    filled = st.get("filled_amount") or 0.0
-    cancelled = False
-    if st.get("order_state") not in ("filled",) and (amount - filled) > 0:
-        dbt_cancel(oid)                                  # 残单撤掉(不留挂)，撤后再查捕捉晚到成交
-        cancelled = True
-        st2 = _extract_order(dbt_get_order_state(oid)) or st
-        if (st2.get("filled_amount") or 0.0) > filled:
-            filled = st2.get("filled_amount")
-    remaining = max(0.0, amount - filled)
-    return {"filled": filled, "avg_price": st.get("average_price") or price,
-            "remaining": remaining, "cancelled": cancelled, "dry": False, "venue": venue,
-            "instrument": instrument, "side": side, "amount": amount, "price": price,
-            "order_id": oid, "reduce_only": reduce_only, "post_only": False,
-            "execution_style": execution_style, "reason": "HEDGE_STEP"}
+    return {"filled": 0.0, "dry": (not allow_live), "venue": venue,
+            "instrument": instrument, "side": side, "amount": amount,
+            "reduce_only": reduce_only, "post_only": False,
+            "execution_style": execution_style, "blocked": True,
+            "reason": "DERIBIT_HEDGE_LEGACY_UNSUPPORTED"}

@@ -2254,6 +2254,19 @@ def _evaluate_hedge(snap, quote_fn=None):
     if settled:
         rem_qty = 0.0
     vcfg = hedge_venue_config(HEDGE_VENUE, HEDGE_BINANCE_INSTRUMENT, HEDGE_BINANCE_EXCHANGE_INDEX)
+    if vcfg["venue"] != "BINANCE":
+        action = {"action": "HEDGE_HOLD", "reduce_only": False,
+                  "delta_contracts": 0.0, "blocked": "UNSUPPORTED_HEDGE_VENUE"}
+        return {"perp_qty": None, "target": None, "action": action,
+                "orphan": False, "side": hedge_side((snap or {}).get("side")),
+                "net_delta": None, "net_option_delta": None,
+                "direction_consistent": True, "venue": vcfg["venue"],
+                "instrument": vcfg["instrument"], "venue_cfg": vcfg,
+                "short_gamma": None, "protection_gamma": None,
+                "gamma_fraction": None, "gamma_data_state": None,
+                "target_semantics": "UNSUPPORTED_HEDGE_VENUE",
+                "unrealized_pnl_usd": None,
+                "data_gap": "UNSUPPORTED_HEDGE_VENUE"}
     state = "SETTLED" if rem_qty <= 0 else "OPEN"
     si, li = (snap or {}).get("short_instrument"), (snap or {}).get("long_instrument")
     quote = quote_fn or exec_quote
@@ -2268,20 +2281,10 @@ def _evaluate_hedge(snap, quote_fn=None):
     settlement_orphan = False
     settlement_reason = None
     hedge_pnl_usd = None
-    if vcfg["venue"] == "BINANCE":
-        snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
-        perp_qty = None if snap_bnc is None else snap_bnc.get("qty")
-        hedge_pnl_usd = None if snap_bnc is None else snap_bnc.get("unrealized_pnl_usd")
-        contract_size, min_trade = 1.0, HEDGE_BINANCE_MIN_TRADE
-    else:
-        try:
-            perp = dbt_get_positions(SETTLEMENT_CURRENCY, "future") or []
-        except Exception:
-            perp = []
-        perp_qty = sum((p.get("size") or 0.0) for p in perp)
-        meta = dbt_get_instrument(vcfg["instrument"]) or {}
-        contract_size = meta.get("contract_size") or HEDGE_CONTRACT_SIZE_FALLBACK
-        min_trade = meta.get("min_trade_amount") or HEDGE_MIN_TRADE_FALLBACK
+    snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
+    perp_qty = None if snap_bnc is None else snap_bnc.get("qty")
+    hedge_pnl_usd = None if snap_bnc is None else snap_bnc.get("unrealized_pnl_usd")
+    contract_size, min_trade = 1.0, HEDGE_BINANCE_MIN_TRADE
     if perp_qty is None:
         action = {"action": "HEDGE_HOLD", "reduce_only": False, "delta_contracts": 0.0,
                   "blocked": "HEDGE_POSITION_DATA_GAP"}

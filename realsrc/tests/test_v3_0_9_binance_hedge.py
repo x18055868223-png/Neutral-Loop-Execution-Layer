@@ -167,6 +167,24 @@ def test_strategy_hedge_snapshot_carries_binance_unrealized_pnl_to_display():
     _restore()
 
 
+def test_strategy_deribit_hedge_venue_fails_closed_without_fallback_sizing():
+    ST.HEDGE_VENUE = "DERIBIT"
+    calls = []
+    ST.dbt_get_positions = lambda *_a: calls.append("positions") or []
+    ST.dbt_get_instrument = lambda *_a: calls.append("instrument") or {}
+    snap = {"side": "CALL", "remaining_short_qty": 0.05, "long_remaining_qty": 0.05,
+            "short_instrument": "S", "long_instrument": "P"}
+
+    h = ST._evaluate_hedge(snap, lambda _inst: {"delta": 0.30})
+
+    assert h["venue"] == "DERIBIT"
+    assert h["data_gap"] == "UNSUPPORTED_HEDGE_VENUE"
+    assert h["action"]["blocked"] == "UNSUPPORTED_HEDGE_VENUE"
+    assert h["target"] is None and h["perp_qty"] is None
+    assert calls == []
+    _restore()
+
+
 def test_manage_cycle_policy_disabled_does_not_use_legacy_hedge_submit():
     ST.RUN_PROFILE = "LIVE"
     ST.ALLOW_ENTRY_TRADING = False

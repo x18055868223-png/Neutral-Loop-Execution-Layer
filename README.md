@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_11.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_12.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.11-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.12-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -133,6 +133,11 @@ This repository contains the current independent execution-layer deliverable onl
   surface: maker-first reduce, slippage guard enable, loss-boundary buffer, and
   slip alert bps. The remaining episode-cost threshold is kept because it is
   used as observability only and does not gate HARD hedge actions.
+- v3.2.12 closes the remaining Deribit perpetual hedge compatibility surface:
+  Deribit hedge fallback sizing constants are removed from the current config,
+  strategy hedge evaluation fails closed on non-Binance hedge venues, and
+  legacy Deribit perp hedge live execution is blocked before quote/order calls.
+  Deribit option entry, exit, quote, and recovery logic are unchanged.
 
 ## Boundary
 

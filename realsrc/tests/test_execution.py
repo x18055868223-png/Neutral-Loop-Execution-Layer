@@ -182,18 +182,22 @@ def test_exit_buyback_maker_passive_below_ask():
     _restore_ex()
 
 
-# ---- C1：Deribit 对冲 None 盘口守门 + 成交确认 ----
+# ---- Minimal V32：旧 Deribit perp hedge live 分支阻断 ----
 
-def test_hedge_step_deribit_no_quote_guard():
+def test_hedge_step_deribit_live_disabled_before_quote_or_order():
+    calls = []
     EX.dbt_ticker = lambda i: {"mark_price": 50000, "best_bid_price": None, "best_ask_price": None}
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.5}
+    EX.dbt_place_order = lambda *a, **k: calls.append((a, k)) or {"order": {"order_id": "bad"}}
     vcfg = {"venue": "DERIBIT", "instrument": "BTC-PERPETUAL", "maker_only": False}
     r = EX.exec_hedge_step(vcfg, "buy", 100.0, reduce_only=False, allow_live=True)
-    assert r["reason"] == "NO_QUOTE" and r["filled"] == 0.0           # price=None → 不下单
+    assert r["reason"] == "DERIBIT_HEDGE_LEGACY_UNSUPPORTED"
+    assert r["blocked"] is True and r["filled"] == 0.0
+    assert calls == []
     _restore_ex()
 
 
-def test_hedge_step_deribit_confirms_fill():
+def test_hedge_step_deribit_live_disabled_before_legacy_submit():
     EX.dbt_ticker = lambda i: {"mark_price": 50000, "best_bid_price": 49999, "best_ask_price": 50001}
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.5}
     seen = {}
@@ -208,9 +212,9 @@ def test_hedge_step_deribit_confirms_fill():
     EX.Sleep = lambda ms: None
     vcfg = {"venue": "DERIBIT", "instrument": "BTC-PERPETUAL", "maker_only": False}
     r = EX.exec_hedge_step(vcfg, "buy", 100.0, reduce_only=False, allow_live=True)
-    assert not r["dry"] and _approx(r["filled"], 100.0) and r["reason"] == "HEDGE_STEP"  # 等待后查得成交
-    assert seen["post_only"] is False and _approx(seen["price"], 50026.0005)
-    assert r["execution_style"] == "PROMPT_LIMIT"
+    assert r["reason"] == "DERIBIT_HEDGE_LEGACY_UNSUPPORTED"
+    assert r["blocked"] is True and r["filled"] == 0.0
+    assert seen == {}
     _restore_ex()
 
 

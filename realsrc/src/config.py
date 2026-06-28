@@ -9,7 +9,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.11-manual-gate"
+STRATEGY_VERSION = "3.2.12-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -84,10 +84,8 @@ EXIT_MAX_PRICE_STEPS_PER_LOOP = 1
 EXIT_RESERVE_RATIO = 0.15          # 退出预算中的费用/保守预留比例
 TAKE_PROFIT_MIN_DTE_HOURS = 3.0    # 普通 80% 捕获止盈要求剩余到期 > 该小时数；风险退出/对冲不受此限制
 
-# ===== 对冲（默认 Binance BTCUSDC 永续；Deribit BTC-PERPETUAL 仅兼容）=====
-HEDGE_REDUCTION_RATIO = 0.5        # 目标覆盖剩余短腿 delta 的比例；压尾部而非全 delta-neutral
-HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退(USD)
-HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
+# ===== 对冲（最小 V32 生产链路只支持 Binance BTCUSDC 永续）=====
+HEDGE_REDUCTION_RATIO = 0.5        # gamma-aware 关闭时的 legacy full target ratio；默认 V32 full target 使用 RAW_FULL_DELTA
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
 HEDGE_VENUE = "BINANCE"            # Minimal V32 hedge supports BINANCE only

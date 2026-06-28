@@ -115,6 +115,11 @@ def test_minimal_config_does_not_expose_maker_first_reduce_switch():
     assert not hasattr(C, "HEDGE_MAKER_FIRST_REDUCE_ENABLED")
 
 
+def test_minimal_config_does_not_expose_deribit_hedge_fallbacks():
+    assert not hasattr(C, "HEDGE_CONTRACT_SIZE_FALLBACK")
+    assert not hasattr(C, "HEDGE_MIN_TRADE_FALLBACK")
+
+
 def test_v32_policy_switch_is_primary_config_name():
     assert C.HEDGE_POLICY_V32_ENABLED is True
     assert C.HEDGE_POLICY_V313_ENABLED == C.HEDGE_POLICY_V32_ENABLED

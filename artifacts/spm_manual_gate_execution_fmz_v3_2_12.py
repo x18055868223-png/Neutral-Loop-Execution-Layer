@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.11-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.12-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.11-manual-gate"
+STRATEGY_VERSION = "3.2.12-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -90,10 +90,8 @@ EXIT_MAX_PRICE_STEPS_PER_LOOP = 1
 EXIT_RESERVE_RATIO = 0.15          # 退出预算中的费用/保守预留比例
 TAKE_PROFIT_MIN_DTE_HOURS = 3.0    # 普通 80% 捕获止盈要求剩余到期 > 该小时数；风险退出/对冲不受此限制
 
-# ===== 对冲（默认 Binance BTCUSDC 永续；Deribit BTC-PERPETUAL 仅兼容）=====
-HEDGE_REDUCTION_RATIO = 0.5        # 目标覆盖剩余短腿 delta 的比例；压尾部而非全 delta-neutral
-HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退(USD)
-HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
+# ===== 对冲（最小 V32 生产链路只支持 Binance BTCUSDC 永续）=====
+HEDGE_REDUCTION_RATIO = 0.5        # gamma-aware 关闭时的 legacy full target ratio；默认 V32 full target 使用 RAW_FULL_DELTA
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
 HEDGE_VENUE = "BINANCE"            # Minimal V32 hedge supports BINANCE only
@@ -4157,41 +4155,11 @@ def exec_hedge_step(venue_cfg, side, amount, reduce_only, allow_live, label="hed
                 "reduce_only": reduce_only, "post_only": False,
                 "execution_style": execution_style, "blocked": True,
                 "reason": "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"}
-    # DERIBIT 反向永续
-    if not allow_live:
-        return {"filled": 0.0, "dry": True, "venue": venue, "instrument": instrument,
-                "side": side, "amount": amount, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "HEDGE_DRYRUN"}
-    q = exec_quote(instrument) or {}
-    bps = (max_slippage_bps or 0) / 10000.0
-    price = ((q.get("best_ask") or 0) * (1.0 + bps) if side == "buy"
-             else (q.get("best_bid") or 0) * (1.0 - bps))
-    if price is None or price <= 0:                       # C1：无可成交盘口 → 不下单（防 price=None 误单）
-        return {"filled": 0.0, "dry": False, "venue": venue, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "NO_QUOTE"}
-    resp = dbt_place_order(side, instrument, amount, price, post_only=False,
-                           reject_post_only=False, label=label, reduce_only=reduce_only)
-    order = _extract_order(resp)
-    if order is None:
-        return {"filled": 0.0, "dry": False, "venue": venue, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style, "reason": "HEDGE_ORDER_FAILED"}
-    oid = order.get("order_id")
-    Sleep(int(CHASE_WAIT_SECONDS * 1000))                 # C1：等一周期再查成交（原即查多为 0）
-    st = _extract_order(dbt_get_order_state(oid)) or order
-    filled = st.get("filled_amount") or 0.0
-    cancelled = False
-    if st.get("order_state") not in ("filled",) and (amount - filled) > 0:
-        dbt_cancel(oid)                                  # 残单撤掉(不留挂)，撤后再查捕捉晚到成交
-        cancelled = True
-        st2 = _extract_order(dbt_get_order_state(oid)) or st
-        if (st2.get("filled_amount") or 0.0) > filled:
-            filled = st2.get("filled_amount")
-    remaining = max(0.0, amount - filled)
-    return {"filled": filled, "avg_price": st.get("average_price") or price,
-            "remaining": remaining, "cancelled": cancelled, "dry": False, "venue": venue,
-            "instrument": instrument, "side": side, "amount": amount, "price": price,
-            "order_id": oid, "reduce_only": reduce_only, "post_only": False,
-            "execution_style": execution_style, "reason": "HEDGE_STEP"}
+    return {"filled": 0.0, "dry": (not allow_live), "venue": venue,
+            "instrument": instrument, "side": side, "amount": amount,
+            "reduce_only": reduce_only, "post_only": False,
+            "execution_style": execution_style, "blocked": True,
+            "reason": "DERIBIT_HEDGE_LEGACY_UNSUPPORTED"}
 
 # ===================== module: ledger =====================
 # -*- coding: utf-8 -*-
@@ -7579,6 +7547,19 @@ def _evaluate_hedge(snap, quote_fn=None):
     if settled:
         rem_qty = 0.0
     vcfg = hedge_venue_config(HEDGE_VENUE, HEDGE_BINANCE_INSTRUMENT, HEDGE_BINANCE_EXCHANGE_INDEX)
+    if vcfg["venue"] != "BINANCE":
+        action = {"action": "HEDGE_HOLD", "reduce_only": False,
+                  "delta_contracts": 0.0, "blocked": "UNSUPPORTED_HEDGE_VENUE"}
+        return {"perp_qty": None, "target": None, "action": action,
+                "orphan": False, "side": hedge_side((snap or {}).get("side")),
+                "net_delta": None, "net_option_delta": None,
+                "direction_consistent": True, "venue": vcfg["venue"],
+                "instrument": vcfg["instrument"], "venue_cfg": vcfg,
+                "short_gamma": None, "protection_gamma": None,
+                "gamma_fraction": None, "gamma_data_state": None,
+                "target_semantics": "UNSUPPORTED_HEDGE_VENUE",
+                "unrealized_pnl_usd": None,
+                "data_gap": "UNSUPPORTED_HEDGE_VENUE"}
     state = "SETTLED" if rem_qty <= 0 else "OPEN"
     si, li = (snap or {}).get("short_instrument"), (snap or {}).get("long_instrument")
     quote = quote_fn or exec_quote
@@ -7593,20 +7574,10 @@ def _evaluate_hedge(snap, quote_fn=None):
     settlement_orphan = False
     settlement_reason = None
     hedge_pnl_usd = None
-    if vcfg["venue"] == "BINANCE":
-        snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
-        perp_qty = None if snap_bnc is None else snap_bnc.get("qty")
-        hedge_pnl_usd = None if snap_bnc is None else snap_bnc.get("unrealized_pnl_usd")
-        contract_size, min_trade = 1.0, HEDGE_BINANCE_MIN_TRADE
-    else:
-        try:
-            perp = dbt_get_positions(SETTLEMENT_CURRENCY, "future") or []
-        except Exception:
-            perp = []
-        perp_qty = sum((p.get("size") or 0.0) for p in perp)
-        meta = dbt_get_instrument(vcfg["instrument"]) or {}
-        contract_size = meta.get("contract_size") or HEDGE_CONTRACT_SIZE_FALLBACK
-        min_trade = meta.get("min_trade_amount") or HEDGE_MIN_TRADE_FALLBACK
+    snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
+    perp_qty = None if snap_bnc is None else snap_bnc.get("qty")
+    hedge_pnl_usd = None if snap_bnc is None else snap_bnc.get("unrealized_pnl_usd")
+    contract_size, min_trade = 1.0, HEDGE_BINANCE_MIN_TRADE
     if perp_qty is None:
         action = {"action": "HEDGE_HOLD", "reduce_only": False, "delta_contracts": 0.0,
                   "blocked": "HEDGE_POSITION_DATA_GAP"}
