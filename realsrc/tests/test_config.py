@@ -111,11 +111,8 @@ def test_minimal_v32_rejects_deribit_hedge_venue():
     assert any("Minimal V32 hedge supports BINANCE only" in e for e in errs)
 
 
-def test_maker_first_reduce_true_is_rejected_if_not_implemented():
-    errs = _with_config(HEDGE_MAKER_FIRST_REDUCE_ENABLED=True)
-
-    assert any("HEDGE_MAKER_FIRST_REDUCE_ENABLED" in e and "must be False" in e
-               for e in errs)
+def test_minimal_config_does_not_expose_maker_first_reduce_switch():
+    assert not hasattr(C, "HEDGE_MAKER_FIRST_REDUCE_ENABLED")
 
 
 def test_v32_policy_switch_is_primary_config_name():

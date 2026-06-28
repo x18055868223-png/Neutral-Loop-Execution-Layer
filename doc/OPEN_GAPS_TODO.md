@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.10-manual-gate`
+- Latest completed release: `3.2.11-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -122,6 +122,15 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   and its legacy tests were deleted, and a source isolation test now prevents
   the runtime authorization module from returning.
 
+## Closed In v3.2.11
+
+- [x] P1: remove unimplemented hedge config switches from the current operator
+  surface. `HEDGE_MAKER_FIRST_REDUCE_ENABLED`,
+  `HEDGE_SLIPPAGE_GUARD_ENABLED`, `HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA`, and
+  `HEDGE_SLIP_ALERT_BPS` were deleted from source and bundle output. Tests now
+  assert these non-wired switches are absent. `HEDGE_EPISODE_COST_ALERT_BPS`
+  remains because it is an observability threshold used by the V32 controller.
+
 ## Must Fix Next
 
 - [ ] P1: no open must-fix item currently identified beyond cleanup candidates
@@ -129,9 +138,14 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 
 ## Redundancy / Cleanup Candidates
 
-- [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
-  dedicated release. v3.2.2 keeps the symbol but config validation rejects
-  `True`, so it is no longer an operator-enabled half feature.
+- [ ] Review the remaining Deribit hedge compatibility branch and fallback
+  sizing constants. Current config validation allows only Binance V32 for
+  minimal live hedge; do not delete Deribit option entry/exit/quote logic.
+- [ ] Clarify or rename `HEDGE_REDUCTION_RATIO` so it is not mistaken for the
+  default gamma-aware full-target sizing control. It is legacy sizing context
+  when gamma-aware behavior is disabled or when building entry risk anchors.
+- [ ] Consider surfacing crash reference age/price in `POSITION_MANAGE` as
+  observability only. Do not add new hedge gates or native conditional orders.
 
 ## Guardrails For Every Iteration
 

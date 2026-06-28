@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.10-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.11-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.10-manual-gate"
+STRATEGY_VERSION = "3.2.11-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -109,13 +109,11 @@ HEDGE_POLICY_V313_ENABLED = HEDGE_POLICY_V32_ENABLED
 HEDGE_STAGING_ENABLED = True
 HEDGE_HYSTERESIS_ENABLED = True
 HEDGE_COOLDOWN_ENABLED = True
-HEDGE_SLIPPAGE_GUARD_ENABLED = True
 HEDGE_SOFT_INITIAL_RATIO = 0.40
 HEDGE_SOFT_ADD_DRIFT_STEP = 0.05
 HEDGE_HARD_DRIFT = 0.35
 HEDGE_HARD_CROSS_BPS = 30
 HEDGE_SOFT_CROSS_BPS = 3
-HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA = 1.0
 HEDGE_GAMMA_AWARE_ENABLED = True
 HEDGE_GAMMA_FRAC_FLOOR = 0.30
 HEDGE_GAMMA_NORM_REF = 1_000_000.0
@@ -126,13 +124,11 @@ HEDGE_FINAL3H_MODE = "SUPPRESS_SOFT_ADD"
 HEDGE_CRASH_ENABLED = True
 HEDGE_CRASH_SPEED_WINDOW_SECONDS = 600
 HEDGE_CRASH_MOVE_BPS = 110
-HEDGE_MAKER_FIRST_REDUCE_ENABLED = False
 HEDGE_SOFT_PERSIST_SECONDS = 60
 HEDGE_REDUCE_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PROB_BUFFER = 0.05
 HEDGE_ADD_COOLDOWN_SECONDS = 30
 HEDGE_REDUCE_COOLDOWN_SECONDS = 60
-HEDGE_SLIP_ALERT_BPS = 8
 HEDGE_EPISODE_COST_ALERT_BPS = 20
 HEDGE_PENDING_STALE_SECONDS = 10
 
@@ -277,11 +273,8 @@ def validate_config():
         errs.append("HEDGE_CRASH_SPEED_WINDOW_SECONDS must be > 0")
     if (not isinstance(HEDGE_POLICY_V32_ENABLED, bool)
             or not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool)
-            or not isinstance(HEDGE_CRASH_ENABLED, bool)
-            or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool)):
-        errs.append("HEDGE_POLICY_V32_ENABLED/HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
-    if HEDGE_MAKER_FIRST_REDUCE_ENABLED is not False:
-        errs.append("HEDGE_MAKER_FIRST_REDUCE_ENABLED is not implemented in minimal V32; must be False")
+            or not isinstance(HEDGE_CRASH_ENABLED, bool)):
+        errs.append("HEDGE_POLICY_V32_ENABLED/HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED must be bool")
     required_limits = (
         "max_open_positions",
         "max_short_gamma",

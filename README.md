@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_10.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_11.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.10-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.11-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -129,6 +129,10 @@ This repository contains the current independent execution-layer deliverable onl
   legacy tests. Runtime interaction remains confirmation-code-only; TP,
   risk-exit, reject, stop, resume, revoke, and manual hedge commands are still
   absent from the FMZ command router and generated bundle.
+- v3.2.11 removes unimplemented hedge configuration switches from the operator
+  surface: maker-first reduce, slippage guard enable, loss-boundary buffer, and
+  slip alert bps. The remaining episode-cost threshold is kept because it is
+  used as observability only and does not gate HARD hedge actions.
 
 ## Boundary
 

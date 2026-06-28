@@ -14,7 +14,7 @@ SPOT = 60000.0
 
 
 def test_default_config_is_live_ready_without_legacy_operator_fields():
-    assert C.STRATEGY_VERSION == "3.2.10-manual-gate"
+    assert C.STRATEGY_VERSION == "3.2.11-manual-gate"
     assert C.RUN_PROFILE == "LIVE"
     assert C.DRY_RUN_PASSED is True
     assert C.ALLOW_ENTRY_TRADING is True
@@ -31,6 +31,10 @@ def test_default_config_is_live_ready_without_legacy_operator_fields():
         "SHORT_DTE_HOURS",
         "ALLOW_TRADING",
         "KILL_SWITCH",
+        "HEDGE_MAKER_FIRST_REDUCE_ENABLED",
+        "HEDGE_SLIPPAGE_GUARD_ENABLED",
+        "HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA",
+        "HEDGE_SLIP_ALERT_BPS",
     ):
         assert not hasattr(C, name)
     assert C.TARGET_DTE_HOURS == 24
