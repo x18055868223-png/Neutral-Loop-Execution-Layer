@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.7-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.8-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.7-manual-gate"
+STRATEGY_VERSION = "3.2.8-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -1593,30 +1593,6 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
         Log("[binance] 下单异常:", str(e))
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "reason": "BINANCE_ORDER_ERROR"}
-
-
-def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None,
-                    execution_style="PROMPT_LIMIT", max_slippage_bps=5):
-    """Legacy Binance hedge helper kept for dry-run tests only.
-
-    V32 live hedge submission must use bnc_submit_hedge_order(), which leaves
-    order lifecycle handling to the pending-first reconciliation controller.
-    """
-    if not side or not amount or amount <= 0:
-        return {"order_id": None, "filled": 0.0, "dry": (not allow_live),
-                "venue": "BINANCE", "reason": "NO_OP"}
-    if not allow_live:
-        return {"order_id": None, "filled": 0.0, "dry": True,
-                "venue": "BINANCE", "symbol": symbol, "side": side,
-                "amount": amount, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style,
-                "reason": "BINANCE_HEDGE_DRYRUN"}
-    return {"order_id": None, "filled": 0.0, "dry": False,
-            "venue": "BINANCE", "symbol": symbol, "side": side,
-            "amount": amount, "reduce_only": reduce_only,
-            "post_only": False, "execution_style": execution_style,
-            "blocked": True,
-            "reason": "LEGACY_HEDGE_HELPER_LIVE_DISABLED"}
 
 # ===================== module: leg_selection =====================
 # -*- coding: utf-8 -*-
@@ -4174,11 +4150,12 @@ def exec_hedge_step(venue_cfg, side, amount, reduce_only, allow_live, label="hed
         return {"filled": 0.0, "dry": (not allow_live), "venue": venue, "reason": "NO_OP"}
     if venue == "BINANCE":
         if not allow_live:
-            return bnc_place_hedge(instrument, side, amount, reduce_only,
-                                   allow_live=False,
-                                   idx=venue_cfg.get("exchange_index"),
-                                   execution_style=execution_style,
-                                   max_slippage_bps=max_slippage_bps)
+            return {"filled": 0.0, "dry": True, "venue": "BINANCE",
+                    "instrument": instrument, "side": side, "amount": amount,
+                    "reduce_only": reduce_only, "post_only": False,
+                    "execution_style": execution_style,
+                    "max_slippage_bps": max_slippage_bps,
+                    "reason": "BINANCE_HEDGE_DRYRUN"}
         return {"filled": 0.0, "dry": False, "venue": "BINANCE",
                 "instrument": instrument, "side": side, "amount": amount,
                 "reduce_only": reduce_only, "post_only": False,

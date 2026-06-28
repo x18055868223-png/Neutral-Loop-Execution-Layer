@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.7-manual-gate`
+- Latest completed release: `3.2.8-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -97,6 +97,14 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   mode and returns `HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT`; V32 live hedge
   submits stay on `bnc_submit_hedge_order()` and pending-first reconciliation.
 
+## Closed In v3.2.8
+
+- [x] P1: fully delete the legacy Binance hedge helper.
+  `bnc_place_hedge()` has been removed from the current source and generated
+  bundle surface. Binance dry-run hedge steps now return a direct intent from
+  `exec_hedge_step()`, while live Binance hedge execution remains fail-closed
+  outside the V32 pending-first reconciliation path.
+
 ## Must Fix Next
 
 - [ ] P1: review remaining placeholder budget reserve:
@@ -113,9 +121,6 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   Runtime authorization commands are no longer part of the FMZ surface and the
   bundle excludes this module. Keep it only if tests still need it as a legacy
   pure-function reference; otherwise remove in a dedicated cleanup release.
-- [ ] Fully delete the dry-run/test-only `bnc_place_hedge()` helper after any
-  remaining isolated tests are migrated to `bnc_submit_hedge_order()` or to
-  pure policy/controller tests.
 - [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
   dedicated release. v3.2.2 keeps the symbol but config validation rejects
   `True`, so it is no longer an operator-enabled half feature.

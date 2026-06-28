@@ -248,27 +248,3 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
         Log("[binance] 下单异常:", str(e))
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "reason": "BINANCE_ORDER_ERROR"}
-
-
-def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None,
-                    execution_style="PROMPT_LIMIT", max_slippage_bps=5):
-    """Legacy Binance hedge helper kept for dry-run tests only.
-
-    V32 live hedge submission must use bnc_submit_hedge_order(), which leaves
-    order lifecycle handling to the pending-first reconciliation controller.
-    """
-    if not side or not amount or amount <= 0:
-        return {"order_id": None, "filled": 0.0, "dry": (not allow_live),
-                "venue": "BINANCE", "reason": "NO_OP"}
-    if not allow_live:
-        return {"order_id": None, "filled": 0.0, "dry": True,
-                "venue": "BINANCE", "symbol": symbol, "side": side,
-                "amount": amount, "reduce_only": reduce_only,
-                "post_only": False, "execution_style": execution_style,
-                "reason": "BINANCE_HEDGE_DRYRUN"}
-    return {"order_id": None, "filled": 0.0, "dry": False,
-            "venue": "BINANCE", "symbol": symbol, "side": side,
-            "amount": amount, "reduce_only": reduce_only,
-            "post_only": False, "execution_style": execution_style,
-            "blocked": True,
-            "reason": "LEGACY_HEDGE_HELPER_LIVE_DISABLED"}

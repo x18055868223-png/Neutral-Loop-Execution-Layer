@@ -18,7 +18,6 @@ from config import (RUN_PROFILE, ALLOW_ENTRY_TRADING, KILL_NEW_RISK, EMERGENCY_R
 from gates import gate_decision, ACTION_ENTRY
 from deribit_io import (dbt_ticker, dbt_get_instrument, dbt_order_book, dbt_place_order,
                        dbt_get_order_state, dbt_cancel)
-from binance_io import bnc_place_hedge
 from accounting import (acct_option_fee_ccy, acct_mark_slippage,
                         acct_chase_cost, acct_spread_cost)
 from position import entry_credit_capped_index, entry_net_credit
@@ -697,11 +696,12 @@ def exec_hedge_step(venue_cfg, side, amount, reduce_only, allow_live, label="hed
         return {"filled": 0.0, "dry": (not allow_live), "venue": venue, "reason": "NO_OP"}
     if venue == "BINANCE":
         if not allow_live:
-            return bnc_place_hedge(instrument, side, amount, reduce_only,
-                                   allow_live=False,
-                                   idx=venue_cfg.get("exchange_index"),
-                                   execution_style=execution_style,
-                                   max_slippage_bps=max_slippage_bps)
+            return {"filled": 0.0, "dry": True, "venue": "BINANCE",
+                    "instrument": instrument, "side": side, "amount": amount,
+                    "reduce_only": reduce_only, "post_only": False,
+                    "execution_style": execution_style,
+                    "max_slippage_bps": max_slippage_bps,
+                    "reason": "BINANCE_HEDGE_DRYRUN"}
         return {"filled": 0.0, "dry": False, "venue": "BINANCE",
                 "instrument": instrument, "side": side, "amount": amount,
                 "reduce_only": reduce_only, "post_only": False,

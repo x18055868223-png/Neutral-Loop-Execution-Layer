@@ -21,7 +21,7 @@
 - FMZ 运行时 `GetCommand()` 的唯一策略交互是方案确认：`执行:<确认码>`、`EXECUTE:<确认码>` 或裸确认码。止盈授权、风险退出授权、拒绝、急停、恢复、撤销授权等不得作为运行时命令分支重新引入。
 - Binance Futures 永续对冲不要把 `BTCUSDC` 直接传给 `SetContractType()`；先切 `IO("currency", "BTC_USDC")`，再 `SetContractType("swap")`。
 - Binance BTCUSDC 永续对冲的 prompt-limit 价格必须按 `HEDGE_BINANCE_PRICE_TICK` 取整：买入向上、卖出向下；不要把原始浮点保护价直接传给 FMZ `Buy`/`Sell`。
-- Binance BTCUSDC 默认启用 `HEDGE_POLICY_V313_ENABLED` reconciliation controller：先处理 pending，再读交易所仓位为真，按 `eff_target - current` 单动作下单；仓位读取失败、pending 未清、sub-min 残量必须 fail-closed/hold，不得叠加第二张同向对冲单。活动 pending 部分成交不得提前清空，必须继续阻断新对冲单；终态成交或 stale 残量撤单后，已成交部分必须进入 `hedge_execution_history`。`HEDGE_POLICY_V313_ENABLED=False` 才走旧 `bnc_place_hedge` prompt-limit 全量路径。
+- Binance BTCUSDC 当前对冲执行是 V32-only：先处理 pending，再读交易所仓位为真，按 `eff_target - current` 单动作下单；仓位读取失败、pending 未清、sub-min 残量必须 fail-closed/hold，不得叠加第二张同向对冲单。活动 pending 部分成交不得提前清空，必须继续阻断新对冲单；终态成交或 stale 残量撤单后，已成交部分必须进入 `hedge_execution_history`。`HEDGE_POLICY_V32_ENABLED=False` 时只能 hold 并返回 `HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT`，不得回落旧提交路径。
 - 对冲 controller 的 HARD 可以绕过 SOFT persistence、add cooldown 和 SOFT slippage guard；成本/滑点只告警不阻断 HARD。SOFT 必须支持 50% staged target、持续后补满、减仓 hysteresis 和方向 cooldown，且孤儿/短腿归零/反向 hedge 必须优先 reduce-only 归零。
 - 入场 precommit 必须检查同腿活动订单冲突：残留 `entry_short` 或额外 `entry_prot` 均 fail-closed；保护腿只能复用当前锁定计划记录的持久订单 id。
 - 风险退出必须同时满足预算价格和卖一深度覆盖剩余短腿数量；盘口深度缺失时显示 `数据缺口` 并 fail-closed，允许既有逻辑评估对冲兜底，不得把缺口显示为 0。

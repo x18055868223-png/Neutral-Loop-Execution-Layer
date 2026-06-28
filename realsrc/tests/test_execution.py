@@ -215,19 +215,29 @@ def test_hedge_step_deribit_confirms_fill():
 
 
 def test_hedge_step_binance_live_disabled_legacy_path():
-    calls = []
-    orig = EX.bnc_place_hedge
-    EX.bnc_place_hedge = lambda *a, **k: calls.append((a, k)) or {
-        "filled": 1.0, "reason": "SHOULD_NOT_CALL_LEGACY"}
-    try:
-        vcfg = {"venue": "BINANCE", "instrument": "BTCUSDC", "exchange_index": 1}
-        r = EX.exec_hedge_step(vcfg, "buy", 0.01, reduce_only=False, allow_live=True)
-        assert r["reason"] == "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"
-        assert r["blocked"] is True
-        assert calls == []
-    finally:
-        EX.bnc_place_hedge = orig
-        _restore_ex()
+    vcfg = {"venue": "BINANCE", "instrument": "BTCUSDC", "exchange_index": 1}
+    r = EX.exec_hedge_step(vcfg, "buy", 0.01, reduce_only=False, allow_live=True)
+    assert r["reason"] == "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"
+    assert r["blocked"] is True
+    assert r["filled"] == 0.0
+    _restore_ex()
+
+
+def test_hedge_step_binance_dry_returns_direct_intent():
+    vcfg = {"venue": "BINANCE", "instrument": "BTCUSDC", "exchange_index": 1}
+    r = EX.exec_hedge_step(vcfg, "sell", 0.02, reduce_only=True, allow_live=False,
+                           execution_style="PROMPT_LIMIT", max_slippage_bps=7)
+    assert r["reason"] == "BINANCE_HEDGE_DRYRUN"
+    assert r["dry"] is True
+    assert r["venue"] == "BINANCE"
+    assert r["instrument"] == "BTCUSDC"
+    assert r["side"] == "sell"
+    assert r["amount"] == 0.02
+    assert r["reduce_only"] is True
+    assert r["post_only"] is False
+    assert r["execution_style"] == "PROMPT_LIMIT"
+    assert r["max_slippage_bps"] == 7
+    _restore_ex()
 
 
 def test_entry_campaign_step_returns_fill_accounting_details():

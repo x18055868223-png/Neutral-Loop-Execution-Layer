@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_7.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_8.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.7-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.8-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -115,6 +115,11 @@ This repository contains the current independent execution-layer deliverable onl
   current execution surface: V32 live hedge submits must use
   `bnc_submit_hedge_order()` plus pending-first reconciliation, while
   `bnc_place_hedge()` remains dry-run/test-only and live calls are blocked.
+- v3.2.8 fully deletes the legacy Binance `bnc_place_hedge()` helper from the
+  current source and bundle surface. Binance dry-run hedge steps now return a
+  direct execution intent from `exec_hedge_step()`, while live Binance hedge
+  execution still stays fail-closed unless driven by the V32 pending-first
+  reconciliation controller and `bnc_submit_hedge_order()`.
 
 ## Boundary
 
