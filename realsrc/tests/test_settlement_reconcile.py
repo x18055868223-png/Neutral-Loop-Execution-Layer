@@ -37,9 +37,32 @@ def _snap(expiry=None):
     }
 
 
+def _accounted_snap(expiry=None, settlement_index_price=92000.0,
+                    settlement_price_source="EXCHANGE_SETTLEMENT",
+                    entry_credit=0.00050):
+    snap = _snap(expiry)
+    snap.update({
+        "short_strike": 90000.0,
+        "long_strike": 87500.0,
+        "entry_profit_ceiling_net": entry_credit,
+        "entry_execution_report": {
+            "actual_net_credit_after_fees": entry_credit,
+        },
+    })
+    if settlement_index_price is not None:
+        snap["settlement_index_price"] = settlement_index_price
+    if settlement_price_source is not None:
+        snap["settlement_price_source"] = settlement_price_source
+    return snap
+
+
+def _approx(a, b, eps=1e-12):
+    return abs((a or 0.0) - (b or 0.0)) <= eps
+
+
 def test_settlement_finalizer_short_expired_absent_sets_remaining_short_zero():
     _clear()
-    snap = _snap()
+    snap = _accounted_snap()
     opt_pos = [{"instrument_name": snap["long_instrument"], "size": 0.1}]
 
     out = ST._settlement_reconcile_snapshot(snap, opt_pos, NOW)
@@ -49,7 +72,86 @@ def test_settlement_finalizer_short_expired_absent_sets_remaining_short_zero():
     assert out["snap"]["long_remaining_qty"] == 0.1
     assert out["snap"]["settlement_state"] == "SHORT_SETTLED"
     assert out["events"][-1]["leg"] == "short"
-    assert out["snap"]["option_settlement_history"][-1]["settlement_pnl_status"] == "NOT_COMPUTED"
+    ev = out["snap"]["option_settlement_history"][-1]
+    assert ev["settlement_pnl_status"] == "COMPUTED"
+    assert ev["settlement_cashflow_ccy"] == 0.0
+    assert out["snap"]["option_realized_pnl_status"] == "COMPUTED"
+    assert _approx(out["snap"]["option_realized_pnl_ccy"], 0.00050)
+
+
+def test_settlement_accounting_both_itm_vertical_cashflow_and_final_pnl():
+    _clear()
+    snap = _accounted_snap(settlement_index_price=86000.0, entry_credit=0.004)
+
+    out = ST._settlement_reconcile_snapshot(snap, [], NOW)
+
+    short_cashflow = -((90000.0 - 86000.0) / 86000.0) * 0.1
+    long_cashflow = ((87500.0 - 86000.0) / 86000.0) * 0.1
+    total_cashflow = short_cashflow + long_cashflow
+    assert out["changed"] is True
+    assert [e["settlement_pnl_status"] for e in out["events"]] == ["COMPUTED", "COMPUTED"]
+    assert _approx(out["snap"]["short_settlement_cashflow_ccy"], short_cashflow)
+    assert _approx(out["snap"]["long_settlement_cashflow_ccy"], long_cashflow)
+    assert _approx(out["snap"]["option_settlement_cashflow_ccy"], total_cashflow)
+    assert out["snap"]["option_realized_pnl_status"] == "COMPUTED"
+    assert _approx(out["snap"]["option_realized_pnl_ccy"], 0.004 + total_cashflow)
+
+
+def test_settlement_accounting_missing_settlement_price_marks_data_gap():
+    _clear()
+    orig = ST.dbt_index_price
+    try:
+        ST.dbt_index_price = lambda _currency: None
+        snap = _accounted_snap(settlement_index_price=None, settlement_price_source=None)
+
+        out = ST._settlement_reconcile_snapshot(snap, [], NOW)
+
+        assert out["changed"] is True
+        assert [e["settlement_pnl_status"] for e in out["events"]] == ["DATA_GAP", "DATA_GAP"]
+        assert out["snap"]["option_settlement_cashflow_ccy"] is None
+        assert out["snap"]["option_realized_pnl_ccy"] is None
+        assert out["snap"]["option_realized_pnl_status"] == "DATA_GAP"
+    finally:
+        ST.dbt_index_price = orig
+
+
+def test_settlement_accounting_index_fallback_marks_estimated():
+    _clear()
+    orig = ST.dbt_index_price
+    try:
+        ST.dbt_index_price = lambda _currency: 88000.0
+        snap = _accounted_snap(settlement_index_price=None, settlement_price_source=None)
+
+        out = ST._settlement_reconcile_snapshot(snap, [], NOW)
+
+        expected_short = -((90000.0 - 88000.0) / 88000.0) * 0.1
+        assert out["changed"] is True
+        assert [e["settlement_pnl_status"] for e in out["events"]] == ["ESTIMATED", "ESTIMATED"]
+        assert [e["settlement_price_source"] for e in out["events"]] == ["INDEX_FALLBACK", "INDEX_FALLBACK"]
+        assert _approx(out["snap"]["option_settlement_cashflow_ccy"], expected_short)
+        assert out["snap"]["option_realized_pnl_status"] == "ESTIMATED"
+        assert _approx(out["snap"]["option_realized_pnl_ccy"], 0.00050 + expected_short)
+    finally:
+        ST.dbt_index_price = orig
+
+
+def test_protection_recovery_fill_records_net_value_and_recomputes_pnl():
+    _clear()
+    snap = _accounted_snap(settlement_index_price=None, settlement_price_source=None)
+    snap["long_remaining_qty"] = 0.1
+    snap["realized_exit_spend"] = 0.0001
+    step = {"sold": 0.04, "avg_price": 0.002, "order_id": "recover-1"}
+
+    ST._apply_protection_recovery_fill(snap, step, NOW)
+
+    fee = ST.acct_option_fee_ccy(0.002, 0.04)
+    net_value = 0.002 * 0.04 - fee
+    assert _approx(snap["long_remaining_qty"], 0.06)
+    assert _approx(snap["realized_protection_recovery_value"], net_value)
+    assert _approx(snap["realized_protection_recovery_fees"], fee)
+    assert snap["protection_recovery_history"][-1]["net_recovery_value"] == net_value
+    assert snap["option_realized_pnl_status"] == "COMPUTED"
+    assert _approx(snap["option_realized_pnl_ccy"], 0.00050 - 0.0001 + net_value)
 
 
 def test_settlement_finalizer_both_legs_expired_absent_sets_both_zero():

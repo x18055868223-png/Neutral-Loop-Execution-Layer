@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.2-manual-gate`
+- Latest completed release: `3.2.3-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -46,24 +46,26 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   implemented and tested.
 - [x] P2: default SOFT persistence is lengthened from 20s to 60s.
 
+## Closed In v3.2.3
+
+- [x] P0: settlement cashflow and final option PnL accounting.
+  Expired option legs now record intrinsic settlement cashflow in settlement
+  currency, with `COMPUTED`, `ESTIMATED`, or `DATA_GAP` status. Tests cover
+  OTM short, both-ITM vertical, missing settlement price, and fallback index
+  price marked `ESTIMATED`.
+- [x] P0: protection recovery accounting.
+  `_apply_protection_recovery_fill()` records gross recovery value, fees, and
+  net recovery value, and recomputes option realized PnL.
+- [x] P1: ledger/display settlement and final PnL fields.
+  `POSITION_MANAGE` ledger detail now surfaces settlement count/cashflow,
+  protection recovery, option realized PnL, and final PnL status.
+
 ## Must Fix Next
 
-- [ ] P0: settlement cashflow and final option PnL accounting.
-  Evidence gap: `_append_settlement_event()` still defaults
-  `settlement_pnl_status=NOT_COMPUTED`. Add tests for OTM/ITM short, ITM long,
-  both-ITM vertical, missing settlement price, and fallback index price marked
-  `ESTIMATED`.
-- [ ] P0: protection recovery accounting.
-  Current recovery only decrements `long_remaining_qty` and appends history.
-  Add `_apply_protection_recovery_fill()` so net recovery value and fees are
-  included in option realized PnL.
 - [ ] P1: real current portfolio inputs for precommit budget.
   `_current_portfolio()` still returns fixed zeros. Replace with strict account
   summary + option position reads; account/position/Greek gaps must block new
   entry, not default to zero.
-- [ ] P1: ledger/display settlement and final PnL fields.
-  Add settlement event count, cashflow, option realized PnL status, final PnL
-  status, and visible non-OK display for `DATA_GAP` / `ESTIMATED`.
 - [ ] P1: no-snapshot orphan hedge policy decision.
   v3.2.1 chose safe manual cleanup display. Later decide whether to keep this
   as the permanent policy or add ownership-proven reduce-only cleanup with

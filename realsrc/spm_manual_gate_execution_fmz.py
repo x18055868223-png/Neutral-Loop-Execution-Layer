@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.2-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.3-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.2-manual-gate"
+STRATEGY_VERSION = "3.2.3-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -2849,6 +2849,40 @@ def _ledger_recovery_table(ctx):
         ["恢复状态", recovery, "启动恢复/孤儿状态"],
         ["活动订单", order_line, "当前持仓相关未完成订单"],
     ]}
+
+
+_ledger_recovery_table_base = _ledger_recovery_table
+
+
+def _ledger_recovery_table(ctx):
+    table = _ledger_recovery_table_base(ctx)
+    ld = (ctx or {}).get("ledger_detail") or {}
+    spot = (ctx or {}).get("spot")
+    rows = table.get("rows") or []
+    extra_rows = [
+        ["Settlement", "status=%s events=%s net=%s" % (
+            ld.get("settlement_pnl_status") or "NONE",
+            ld.get("settlement_event_count") or 0,
+            _btc_usd_gap(ld.get("option_settlement_cashflow_ccy"), spot)),
+         "short %s / long %s" % (
+             _btc_usd_gap(ld.get("short_settlement_cashflow_ccy"), spot),
+             _btc_usd_gap(ld.get("long_settlement_cashflow_ccy"), spot))],
+        ["Protection recovery", "net %s / fees %s" % (
+            _btc_usd_gap(ld.get("realized_protection_recovery_value"), spot),
+            _btc_usd_gap(ld.get("realized_protection_recovery_fees"), spot)),
+         "included in option realized PnL"],
+        ["Option realized PnL", "status=%s value=%s" % (
+            ld.get("option_realized_pnl_status") or "DATA_GAP",
+            _btc_usd_gap(ld.get("option_realized_pnl_ccy"), spot)),
+         "entry credit - exits + protection recovery + settlement"],
+        ["Final option PnL", "status=%s value=%s" % (
+            ld.get("final_pnl_status") or "OPEN",
+            _btc_usd_gap(ld.get("final_option_pnl_ccy"), spot)),
+         "only final when both option legs are closed"],
+    ]
+    insert_at = 4 if len(rows) >= 4 else len(rows)
+    table["rows"] = rows[:insert_at] + extra_rows + rows[insert_at:]
+    return table
 
 
 def disp_position_manage_tables(ctx):
@@ -6480,6 +6514,199 @@ def _leg_absent_or_zero(actual, inst):
     return abs(actual.get(inst, 0.0) or 0.0) <= 1e-9
 
 
+def _option_kind_from_instrument(inst, fallback_side=None):
+    parts = str(inst or "").upper().split("-")
+    token = parts[-1] if parts else ""
+    if token in ("P", "PUT"):
+        return "PUT"
+    if token in ("C", "CALL"):
+        return "CALL"
+    side = str(fallback_side or "").upper()
+    if "PUT" in side:
+        return "PUT"
+    if "CALL" in side:
+        return "CALL"
+    return None
+
+
+def _option_strike_from_instrument(inst):
+    parts = str(inst or "").split("-")
+    if len(parts) < 3:
+        return None
+    try:
+        return float(parts[-2])
+    except Exception:
+        return None
+
+
+def _settlement_float(value):
+    if _settlement_is_num(value):
+        return float(value)
+    return None
+
+
+def _settlement_leg_strike(snap, leg, inst):
+    keys = ["%s_strike" % leg]
+    if leg == "long":
+        keys.append("protection_strike")
+    for key in keys:
+        value = _settlement_float((snap or {}).get(key))
+        if value is not None:
+            return value
+    return _option_strike_from_instrument(inst)
+
+
+def _entry_net_credit_ccy(snap):
+    report = (snap or {}).get("entry_execution_report") or {}
+    for value in (report.get("actual_net_credit_after_fees"),
+                  (snap or {}).get("entry_profit_ceiling_net")):
+        out = _settlement_float(value)
+        if out is not None:
+            return out
+    return None
+
+
+def _settlement_can_use_index_fallback(snap):
+    return _entry_net_credit_ccy(snap) is not None
+
+
+def _settlement_status_from_source(source):
+    s = str(source or "").upper()
+    if s in ("INDEX_FALLBACK", "ESTIMATED", "FALLBACK_INDEX"):
+        return "ESTIMATED"
+    return "COMPUTED"
+
+
+def _settlement_price_context(snap, leg):
+    snap = snap or {}
+    for key in ("%s_settlement_index_price" % leg, "settlement_index_price"):
+        price = _settlement_float(snap.get(key))
+        if price is not None and price > 0:
+            source = (snap.get("%s_settlement_price_source" % leg)
+                      or snap.get("settlement_price_source")
+                      or "EXCHANGE_SETTLEMENT")
+            return {"price": price, "source": source,
+                    "status": _settlement_status_from_source(source)}
+    if _settlement_can_use_index_fallback(snap):
+        try:
+            price = _settlement_float(dbt_index_price(SETTLEMENT_CURRENCY))
+        except Exception:
+            price = None
+        if price is not None and price > 0:
+            return {"price": price, "source": "INDEX_FALLBACK", "status": "ESTIMATED"}
+    return {"price": None, "source": "DATA_GAP", "status": "DATA_GAP"}
+
+
+def _option_intrinsic_ccy(kind, strike, index_price):
+    if kind not in ("PUT", "CALL") or strike is None or index_price is None or index_price <= 0:
+        return None
+    if kind == "PUT":
+        return max(strike - index_price, 0.0) / index_price
+    return max(index_price - strike, 0.0) / index_price
+
+
+def _settlement_status_join(statuses):
+    states = [s for s in statuses if s]
+    if any(s == "DATA_GAP" for s in states):
+        return "DATA_GAP"
+    if any(s == "ESTIMATED" for s in states):
+        return "ESTIMATED"
+    if states:
+        return "COMPUTED"
+    return "COMPUTED"
+
+
+def _build_settlement_event(snap, leg, instrument, qty_before, actual_size, reason, now_ms):
+    ctx = _settlement_price_context(snap, leg)
+    kind = _option_kind_from_instrument(instrument, (snap or {}).get("side"))
+    strike = _settlement_leg_strike(snap, leg, instrument)
+    intrinsic = _option_intrinsic_ccy(kind, strike, ctx.get("price"))
+    status = ctx.get("status")
+    cashflow = None
+    gap = None
+    if intrinsic is None:
+        status = "DATA_GAP"
+        if kind is None:
+            gap = "OPTION_KIND_MISSING"
+        elif strike is None:
+            gap = "OPTION_STRIKE_MISSING"
+        else:
+            gap = "SETTLEMENT_INDEX_PRICE_MISSING"
+    else:
+        qty = qty_before or 0.0
+        signed = -1.0 if leg == "short" else 1.0
+        cashflow = signed * intrinsic * qty
+    return {
+        "ts": now_ms, "leg": leg, "instrument": instrument,
+        "qty_before": qty_before, "qty_after": 0.0,
+        "exchange_position_size": actual_size,
+        "reason": reason,
+        "option_kind": kind,
+        "strike": strike,
+        "settlement_index_price": ctx.get("price"),
+        "settlement_price_source": ctx.get("source"),
+        "intrinsic_ccy": intrinsic,
+        "settlement_cashflow_ccy": cashflow,
+        "settlement_pnl_ccy": cashflow,
+        "settlement_pnl_status": status,
+        "settlement_data_gap": gap,
+    }
+
+
+def _recompute_option_realized_pnl(snap):
+    if snap is None:
+        return snap
+    hist = list((snap or {}).get("option_settlement_history") or [])
+    statuses = []
+    data_gap = False
+    short_cashflow = 0.0
+    long_cashflow = 0.0
+    for rec in hist:
+        status = (rec or {}).get("settlement_pnl_status")
+        statuses.append(status)
+        cashflow = (rec or {}).get("settlement_cashflow_ccy")
+        if status in ("DATA_GAP", "NOT_COMPUTED") or cashflow is None:
+            data_gap = True
+            continue
+        if (rec or {}).get("leg") == "short":
+            short_cashflow += cashflow
+        elif (rec or {}).get("leg") == "long":
+            long_cashflow += cashflow
+    settlement_status = _settlement_status_join(statuses)
+    if data_gap:
+        settlement_status = "DATA_GAP"
+        snap["short_settlement_cashflow_ccy"] = None
+        snap["long_settlement_cashflow_ccy"] = None
+        snap["option_settlement_cashflow_ccy"] = None
+    else:
+        total_cashflow = short_cashflow + long_cashflow
+        snap["short_settlement_cashflow_ccy"] = short_cashflow
+        snap["long_settlement_cashflow_ccy"] = long_cashflow
+        snap["option_settlement_cashflow_ccy"] = total_cashflow
+    snap["settlement_pnl_status"] = settlement_status
+    entry_credit = _entry_net_credit_ccy(snap)
+    if entry_credit is None or data_gap:
+        snap["option_realized_pnl_ccy"] = None
+        snap["option_realized_pnl_status"] = "DATA_GAP"
+    else:
+        total_cashflow = snap.get("option_settlement_cashflow_ccy") or 0.0
+        exit_spend = snap.get("realized_exit_spend") or 0.0
+        recovery_value = snap.get("realized_protection_recovery_value") or 0.0
+        snap["option_realized_pnl_ccy"] = entry_credit - exit_spend + recovery_value + total_cashflow
+        snap["option_realized_pnl_status"] = settlement_status
+    short_now = snap.get("remaining_short_qty") or 0.0
+    long_now = snap.get("long_remaining_qty")
+    if long_now is None:
+        long_now = snap.get("long_fill_amount") or 0.0
+    if short_now <= 1e-12 and (long_now or 0.0) <= 1e-12:
+        snap["final_option_pnl_ccy"] = snap.get("option_realized_pnl_ccy")
+        snap["final_pnl_status"] = snap.get("option_realized_pnl_status")
+    else:
+        snap["final_option_pnl_ccy"] = None
+        snap["final_pnl_status"] = "OPEN"
+    return snap
+
+
 def _append_settlement_event(snap, event):
     rec = dict(event or {})
     rec.setdefault("settlement_pnl_ccy", None)
@@ -6487,6 +6714,8 @@ def _append_settlement_event(snap, event):
     hist = list((snap or {}).get("option_settlement_history") or [])
     hist.append(rec)
     snap["option_settlement_history"] = hist[-50:]
+    _recompute_option_realized_pnl(snap)
+    return rec
 
 
 def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
@@ -6513,24 +6742,20 @@ def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
             and _leg_expired_for_settlement(short_expiry, now_ms)
             and _leg_absent_or_zero(actual, short_inst)):
         updated["remaining_short_qty"] = 0.0
-        ev = {"ts": now_ms, "leg": "short", "instrument": short_inst,
-              "qty_before": short_qty, "qty_after": 0.0,
-              "exchange_position_size": actual.get(short_inst, 0.0),
-              "reason": "SHORT_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
-        _append_settlement_event(updated, ev)
-        events.append(ev)
+        ev = _build_settlement_event(updated, "short", short_inst, short_qty,
+                                     actual.get(short_inst, 0.0),
+                                     "SHORT_OPTION_SETTLED_ABSENT_ON_EXCHANGE", now_ms)
+        events.append(_append_settlement_event(updated, ev))
         ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)
 
     if (long_qty > 1e-12
             and _leg_expired_for_settlement(long_expiry, now_ms)
             and _leg_absent_or_zero(actual, long_inst)):
         updated["long_remaining_qty"] = 0.0
-        ev = {"ts": now_ms, "leg": "long", "instrument": long_inst,
-              "qty_before": long_qty, "qty_after": 0.0,
-              "exchange_position_size": actual.get(long_inst, 0.0),
-              "reason": "LONG_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
-        _append_settlement_event(updated, ev)
-        events.append(ev)
+        ev = _build_settlement_event(updated, "long", long_inst, long_qty,
+                                     actual.get(long_inst, 0.0),
+                                     "LONG_OPTION_SETTLED_ABSENT_ON_EXCHANGE", now_ms)
+        events.append(_append_settlement_event(updated, ev))
 
     if not events:
         return {"snap": snap, "changed": False, "events": [],
@@ -6547,6 +6772,7 @@ def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
     else:
         state = "LONG_SETTLED"
     updated["settlement_state"] = state
+    _recompute_option_realized_pnl(updated)
     return {"snap": updated, "changed": True, "events": events,
             "settlement_state": state, "reason": "OPTION_SETTLEMENT_RECONCILED"}
 
@@ -6851,6 +7077,7 @@ def _archive_closed(snap, now_ms):
         return False
     hist = list(_G(_CLOSED_HISTORY_KEY) or [])
     rec = dict(snap or {})
+    _recompute_option_realized_pnl(rec)
     rec["closed_ts"] = now_ms
     hist.append(rec)
     _G(_CLOSED_HISTORY_KEY, hist[-50:])
@@ -7189,9 +7416,43 @@ def _apply_exit_fill(snap, step, now_ms):
     snap["realized_exit_spend"] = (snap.get("realized_exit_spend") or 0.0) + price * filled + fee
     snap["last_exit_ts"] = now_ms
     _append_execution_history(snap, "exit_execution_history", step, now_ms)
+    _recompute_option_realized_pnl(snap)
     if snap["remaining_short_qty"] <= 1e-12:
         ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)   # 短腿归零，转保护腿回收（不可直跳 CLOSED）
     _G(_POSITION_KEY, snap)
+
+
+def _apply_protection_recovery_fill(snap, step, now_ms):
+    if not snap or not step:
+        return snap
+    detail = dict(step.get("execution") or step)
+    sold = detail.get("sold")
+    if sold is None:
+        sold = detail.get("filled")
+    if sold is None:
+        sold = step.get("sold") or step.get("filled") or 0.0
+    price = detail.get("avg_price") or detail.get("price") or step.get("avg_price") or step.get("price") or 0.0
+    fee = detail.get("fee") or detail.get("fee_used")
+    if fee is None:
+        fee = acct_option_fee_ccy(price, sold)
+    gross_value = price * sold
+    net_value = gross_value - fee
+    snap["long_remaining_qty"] = max(0.0, (snap.get("long_remaining_qty") or 0.0) - sold)
+    snap["realized_protection_recovery_gross"] = (
+        (snap.get("realized_protection_recovery_gross") or 0.0) + gross_value)
+    snap["realized_protection_recovery_fees"] = (
+        (snap.get("realized_protection_recovery_fees") or 0.0) + fee)
+    snap["realized_protection_recovery_value"] = (
+        (snap.get("realized_protection_recovery_value") or 0.0) + net_value)
+    detail["sold"] = sold
+    detail["avg_price"] = price
+    detail["gross_recovery_value"] = gross_value
+    detail["recovery_fee"] = fee
+    detail["net_recovery_value"] = net_value
+    _append_execution_history(snap, "protection_recovery_history", detail, now_ms)
+    _recompute_option_realized_pnl(snap)
+    _G(_POSITION_KEY, snap)
+    return snap
 
 
 def _evaluate_hedge(snap, quote_fn=None):
@@ -8276,6 +8537,17 @@ def _build_ledger_detail(snap, rec, recovery, in_flight, tp):
         "exit_fill_count": len(snap.get("exit_execution_history") or []),
         "protection_recovery_count": len(snap.get("protection_recovery_history") or []),
         "hedge_fill_count": len(snap.get("hedge_execution_history") or []),
+        "settlement_event_count": len(snap.get("option_settlement_history") or []),
+        "settlement_pnl_status": snap.get("settlement_pnl_status"),
+        "short_settlement_cashflow_ccy": snap.get("short_settlement_cashflow_ccy"),
+        "long_settlement_cashflow_ccy": snap.get("long_settlement_cashflow_ccy"),
+        "option_settlement_cashflow_ccy": snap.get("option_settlement_cashflow_ccy"),
+        "option_realized_pnl_status": snap.get("option_realized_pnl_status"),
+        "option_realized_pnl_ccy": snap.get("option_realized_pnl_ccy"),
+        "final_pnl_status": snap.get("final_pnl_status"),
+        "final_option_pnl_ccy": snap.get("final_option_pnl_ccy"),
+        "realized_protection_recovery_value": snap.get("realized_protection_recovery_value") or 0.0,
+        "realized_protection_recovery_fees": snap.get("realized_protection_recovery_fees") or 0.0,
         "reconciled": rec.get("reconciled"),
         "reconcile_reasons": rec.get("reasons") or [],
         "recovery_state": recovery.get("state") or "OK",
@@ -8422,10 +8694,7 @@ def manage_cycle(now_ms):
         if prec["can_sell"] and exit_gate and li:
             r = exec_protection_recovery_step(li, long_rem, allow_live=True, quote=quote_fn(li))
             if (r.get("sold") or 0) > 0 and snap:
-                snap["long_remaining_qty"] = max(0.0, long_rem - r["sold"])
-                _append_execution_history(snap, "protection_recovery_history",
-                                          r.get("execution") or r, now_ms)
-                _G(_POSITION_KEY, snap)
+                _apply_protection_recovery_fill(snap, r, now_ms)
                 long_rem = snap["long_remaining_qty"]
 
     # P0② CLOSED 归档：两腿 + 对冲 perp 均归零（对冲未归零不 CLOSED）

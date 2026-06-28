@@ -644,6 +644,40 @@ def _ledger_recovery_table(ctx):
     ]}
 
 
+_ledger_recovery_table_base = _ledger_recovery_table
+
+
+def _ledger_recovery_table(ctx):
+    table = _ledger_recovery_table_base(ctx)
+    ld = (ctx or {}).get("ledger_detail") or {}
+    spot = (ctx or {}).get("spot")
+    rows = table.get("rows") or []
+    extra_rows = [
+        ["Settlement", "status=%s events=%s net=%s" % (
+            ld.get("settlement_pnl_status") or "NONE",
+            ld.get("settlement_event_count") or 0,
+            _btc_usd_gap(ld.get("option_settlement_cashflow_ccy"), spot)),
+         "short %s / long %s" % (
+             _btc_usd_gap(ld.get("short_settlement_cashflow_ccy"), spot),
+             _btc_usd_gap(ld.get("long_settlement_cashflow_ccy"), spot))],
+        ["Protection recovery", "net %s / fees %s" % (
+            _btc_usd_gap(ld.get("realized_protection_recovery_value"), spot),
+            _btc_usd_gap(ld.get("realized_protection_recovery_fees"), spot)),
+         "included in option realized PnL"],
+        ["Option realized PnL", "status=%s value=%s" % (
+            ld.get("option_realized_pnl_status") or "DATA_GAP",
+            _btc_usd_gap(ld.get("option_realized_pnl_ccy"), spot)),
+         "entry credit - exits + protection recovery + settlement"],
+        ["Final option PnL", "status=%s value=%s" % (
+            ld.get("final_pnl_status") or "OPEN",
+            _btc_usd_gap(ld.get("final_option_pnl_ccy"), spot)),
+         "only final when both option legs are closed"],
+    ]
+    insert_at = 4 if len(rows) >= 4 else len(rows)
+    table["rows"] = rows[:insert_at] + extra_rows + rows[insert_at:]
+    return table
+
+
 def disp_position_manage_tables(ctx):
     return [
         _position_manage_overview_table(ctx),

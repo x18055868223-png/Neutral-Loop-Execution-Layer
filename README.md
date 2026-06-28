@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_2.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_3.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.2-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.3-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -72,9 +72,10 @@ This repository contains the current independent execution-layer deliverable onl
 - v3.1.5 wires option-settlement reconciliation into startup recovery and
   `POSITION_MANAGE`: after expiry grace and a successful exchange option read,
   absent settled legs are finalized in the local snapshot with
-  `option_settlement_history` (`settlement_pnl_status=NOT_COMPUTED`), settled
+  `option_settlement_history` with a placeholder accounting status, settled
   shorts force hedge target zero/orphan reduce-only cleanup, and short-flat TP
-  evaluation no longer quotes expired instruments.
+  evaluation no longer quotes expired instruments. The `NOT_COMPUTED`
+  settlement accounting placeholder is superseded by v3.2.3.
 - v3.2.0 upgrades the Binance hedge reconciliation policy with gamma-aware
   SOFT sizing, raw full-delta HARD/CRASH targets, a 20% no-trade rebalance
   band, ordinary reduce min-hold, final-3h SOFT-add suppression, and a 10-minute
@@ -92,6 +93,12 @@ This repository contains the current independent execution-layer deliverable onl
   enter an unknown-submit guard, the policy state key migrates from V313 to V32,
   policy-disabled cycles hold instead of falling back to the old submit path,
   and minimal V32 config rejects Deribit hedge venue plus maker-first reduce.
+- v3.2.3 closes the settlement accounting loop: expired option legs record
+  settlement cashflow and `COMPUTED` / `ESTIMATED` / `DATA_GAP` status,
+  protection recovery fills record gross value, fees, and net recovery value,
+  option realized PnL is recomputed from entry credit, exits, recovery, and
+  settlement, and the position-management ledger table surfaces settlement,
+  recovery, realized PnL, and final PnL status.
 
 ## Boundary
 
