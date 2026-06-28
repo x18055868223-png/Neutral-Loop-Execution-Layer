@@ -148,6 +148,11 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `crash_ref_age_seconds`, and `crash_adverse_bps`; the risk/hedge table renders
   a `Crash观测` row that explicitly states it is read-only and does not add
   gates or native conditional orders.
+- [x] P2: clarify `HEDGE_REDUCTION_RATIO` without renaming it. The current
+  config comment now states that it is a legacy full-target ratio only when
+  `HEDGE_GAMMA_AWARE_ENABLED=False`; default V32 gamma-aware sizing uses
+  `RAW_FULL_DELTA` for `full_target` and applies SOFT scaling later. The name is
+  kept for config compatibility and entry risk-anchor policy context.
 
 ## Must Fix Next
 
@@ -156,9 +161,8 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 
 ## Redundancy / Cleanup Candidates
 
-- [ ] Clarify or rename `HEDGE_REDUCTION_RATIO` so it is not mistaken for the
-  default gamma-aware full-target sizing control. It is legacy sizing context
-  when gamma-aware behavior is disabled or when building entry risk anchors.
+- [ ] No open cleanup candidate currently identified. Keep this section active
+  for the next audit pass rather than deleting it.
 
 ## Guardrails For Every Iteration
 
