@@ -71,7 +71,11 @@ def bnc_get_position_snapshot(symbol, idx=None):
         net = 0.0
         pnl = 0.0
         pnl_seen = False
-        positions = list(ex.GetPosition() or [])
+        raw_positions = ex.GetPosition()
+        if raw_positions is None:
+            Log("[binance] GetPosition 返回 None，按数据缺口处理")
+            return None
+        positions = list(raw_positions or [])
         for p in positions:
             amt = p.get("Amount") or 0.0
             long_side = p.get("Type") in (0, "buy", "long", "Long")
@@ -205,10 +209,12 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
     if ex is None:
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "reason": "BINANCE_EXCHANGE_UNAVAILABLE"}
-    missing = _missing_methods(ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell"))
+    missing = _missing_methods(
+        ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell",
+             "GetOrder", "CancelOrder"))
     if missing:
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_ORDER_SUBMIT_UNSUPPORTED",
+                "reason": "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
                 "blocked": True, "missing_methods": missing}
     try:
         pair, contract_type = _select_binance_perp(ex, symbol)
@@ -223,6 +229,14 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
         ex.SetDirection(direction)
         resp = ex.Buy(price, amount) if side == "buy" else ex.Sell(price, amount)
         oid = _order_id(resp)
+        if oid is None:
+            return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
+                    "symbol": symbol, "side": side, "amount": amount, "price": price,
+                    "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
+                    "order": resp, "reduce_only": reduce_only, "post_only": False,
+                    "execution_style": execution_style, "cross_bps": cross_bps,
+                    "pair": pair, "contract_type": contract_type,
+                    "reason": "BINANCE_ORDER_ID_MISSING", "blocked": True}
         return {"order_id": oid, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "symbol": symbol, "side": side, "amount": amount, "price": price,
                 "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,

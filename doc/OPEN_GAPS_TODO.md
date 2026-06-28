@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release before this queue: `3.2.0-manual-gate`
+- Latest completed release: `3.2.2-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -28,6 +28,23 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `RECOVERY_BLOCKED`.
 - [x] P2: settled or short-flat positions skip short-leg risk quote and return
   `OPTION_SETTLED_NO_SHORT_RISK`.
+
+## Closed In v3.2.2
+
+- [x] P0: Binance `GetPosition()` returning `None` is treated as
+  `HEDGE_POSITION_DATA_GAP`, not flat zero.
+- [x] P0: V32 Binance hedge submit requires `GetOrder` and `CancelOrder` before
+  submitting, preserving pending-first single-flight recovery.
+- [x] P0: live hedge submit responses without an order id return
+  `BINANCE_ORDER_ID_MISSING` and set an unknown-submit guard for the next cycle.
+- [x] P0/P1: hedge policy naming is consolidated on V32 with migration from
+  `spm_hedge_policy_v313_state` to `spm_hedge_policy_v32_state`.
+- [x] P1: disabling V32 hedge policy no longer falls back to legacy hedge submit;
+  the cycle holds with `HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT`.
+- [x] P1: minimal V32 config rejects Deribit hedge venue and rejects
+  `HEDGE_MAKER_FIRST_REDUCE_ENABLED=True` until maker-first reduce is actually
+  implemented and tested.
+- [x] P2: default SOFT persistence is lengthened from 20s to 60s.
 
 ## Must Fix Next
 
@@ -51,6 +68,10 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   v3.2.1 chose safe manual cleanup display. Later decide whether to keep this
   as the permanent policy or add ownership-proven reduce-only cleanup with
   explicit config and tests.
+- [ ] P1: decide whether to delete legacy hedge helper paths after one more
+  reference audit. v3.2.2 prevents production fallback, but `bnc_place_hedge()`
+  and `exec_hedge_step()` still exist for isolated tests / Deribit execution
+  tests and should not be exposed as the current operator path.
 
 ## Redundancy / Cleanup Candidates
 
@@ -64,15 +85,15 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 - [ ] Review placeholder budget fields:
   `short_vega = 0.0` and `hedge_margin_reserve = 0.0` in precommit live data.
   These are not acceptable long-term risk inputs.
-- [ ] Keep `HEDGE_MAKER_FIRST_REDUCE_ENABLED = False` until live/order-book
-  evidence proves maker-first reduce lowers cost without increasing stuck
-  pending risk.
+- [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
+  dedicated release. v3.2.2 keeps the symbol but config validation rejects
+  `True`, so it is no longer an operator-enabled half feature.
 
 ## Guardrails For Every Iteration
 
 - [ ] Write failing tests before production fixes.
 - [ ] Do not weaken `evaluate_precommit_checks()`, `gate_decision()`,
-  execution feasibility, risk-exit budget, or the V32/V313 pending hedge
+  execution feasibility, risk-exit budget, or the V32 pending hedge
   single-flight controller.
 - [ ] Do not reintroduce runtime commands beyond `执行:<确认码>`,
   `EXECUTE:<确认码>`, or bare confirmation code.

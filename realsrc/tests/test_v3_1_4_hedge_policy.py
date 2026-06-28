@@ -14,7 +14,8 @@ H = 3600000
 
 _MISSING = object()
 _ORIG = {k: getattr(ST, k, _MISSING) for k in (
-    "HEDGE_POLICY_V313_ENABLED", "HEDGE_STAGING_ENABLED", "HEDGE_HYSTERESIS_ENABLED",
+    "HEDGE_POLICY_V313_ENABLED", "HEDGE_POLICY_V32_ENABLED",
+    "HEDGE_STAGING_ENABLED", "HEDGE_HYSTERESIS_ENABLED",
     "HEDGE_COOLDOWN_ENABLED", "HEDGE_SLIPPAGE_GUARD_ENABLED",
     "HEDGE_SOFT_INITIAL_RATIO", "HEDGE_SOFT_ADD_DRIFT_STEP", "HEDGE_HARD_DRIFT",
     "HEDGE_HARD_CROSS_BPS", "HEDGE_SOFT_CROSS_BPS",
@@ -44,6 +45,7 @@ def _restore():
 def _setup():
     _restore()
     ST.HEDGE_POLICY_V313_ENABLED = True
+    ST.HEDGE_POLICY_V32_ENABLED = True
     ST.HEDGE_STAGING_ENABLED = True
     ST.HEDGE_HYSTERESIS_ENABLED = True
     ST.HEDGE_COOLDOWN_ENABLED = True
@@ -454,3 +456,65 @@ def test_submit_sets_pending_and_next_plan_is_idempotent():
     assert len(submits) == 1
     assert second["action"]["action"] == "HEDGE_HOLD"
     assert second["policy_detail"]["reason"] == "PENDING_ACTIVE"
+
+
+def test_v32_state_key_migrates_from_v313_once():
+    _setup()
+    old_key = "spm_hedge_policy_v313_state"
+    fmz_shim._G(old_key, {
+        "policy": "V313",
+        "position_id": "pos-v314",
+        "pending_order_id": "oid-old",
+        "pending_order_created_ts": NOW,
+    })
+
+    st = ST._hedge_policy_state(_snap())
+
+    assert ST._HEDGE_POLICY_STATE_KEY == "spm_hedge_policy_v32_state"
+    assert st["policy"] == "V32"
+    assert st["pending_order_id"] == "oid-old"
+    assert fmz_shim._G(old_key) is None
+
+
+def test_v32_enabled_switch_controls_policy():
+    _setup()
+    ST.HEDGE_POLICY_V32_ENABLED = False
+
+    h = ST._hedge_policy_plan(_snap(), _hedge(), _risk(), NOW)
+
+    assert h["action"]["action"] == "HEDGE_HOLD"
+    assert h["policy_detail"]["reason"] == "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"
+
+
+def test_submit_without_order_id_sets_unknown_submit_guard():
+    _setup()
+    ST.bnc_submit_hedge_order = lambda **kw: {
+        "order_id": None,
+        "filled": 0.0,
+        "dry": False,
+        "venue": "BINANCE",
+        "reason": "BINANCE_ORDER_ID_MISSING",
+        "blocked": True,
+    }
+
+    first = _plan(current=0.0, target=0.02)
+    step = ST._hedge_policy_submit(first, NOW, allow_live=True)
+    st = ST._hedge_policy_state(_snap())
+
+    assert step["reason"] == "BINANCE_ORDER_ID_MISSING"
+    assert st["last_submit_unknown_reason"] == "BINANCE_ORDER_ID_MISSING"
+    assert st["last_submit_unknown_ts"] == NOW
+    assert st["pending_order_id"] is None
+
+
+def test_unknown_submit_guard_prevents_immediate_duplicate():
+    _setup()
+    st = ST._hedge_policy_state(_snap())
+    st["last_submit_unknown_ts"] = NOW - 1000
+    st["last_submit_unknown_reason"] = "BINANCE_ORDER_ID_MISSING"
+    ST._hedge_policy_save_state(st)
+
+    h = _plan(current=0.0, target=0.02)
+
+    assert h["action"]["action"] == "HEDGE_HOLD"
+    assert h["policy_detail"]["reason"] == "SUBMIT_UNKNOWN_RECENT"

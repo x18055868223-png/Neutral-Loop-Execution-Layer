@@ -27,6 +27,20 @@
 - 风险退出必须同时满足预算价格和卖一深度覆盖剩余短腿数量；盘口深度缺失时显示 `数据缺口` 并 fail-closed，允许既有逻辑评估对冲兜底，不得把缺口显示为 0。
 - 普通 80% 捕获止盈必须同时满足剩余短腿 DTE 大于 `TAKE_PROFIT_MIN_DTE_HOURS`（当前 3.0h）；最后 3 小时只暂停普通止盈，不得阻断风险退出、风险对冲、孤儿对冲清理或交割结算。
 
+## v3.2.2 Hedge Closeout Override
+
+- Current hedge execution is V32-only for Binance BTCUSDC. `HEDGE_POLICY_V32_ENABLED`
+  is the primary switch; `HEDGE_POLICY_V313_ENABLED` is only a compatibility
+  alias for older references. Disabling V32 must hold with
+  `HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT`, not fall back to old hedge submit.
+- Minimal V32 hedge supports `HEDGE_VENUE = "BINANCE"` only. Deribit option
+  entry/exit/quote paths remain separate and must not be confused with the
+  hedge venue.
+- Binance hedge submit requires order lifecycle methods (`GetOrder` and
+  `CancelOrder`). If a live submit returns no order id, record
+  `BINANCE_ORDER_ID_MISSING` / `SUBMIT_UNKNOWN_RECENT` and wait for the next
+  exchange-position read instead of submitting another hedge.
+
 ## Operator Surface
 
 - `LogStatus` 是交易员主阅读面板，必须保留完整状态展示层：`交互控制台`、`运行概览`、`完整主链模块回显`、`固定备选方案库`、候选/选用方案预览、`将下达订单`、`合理性检查`。

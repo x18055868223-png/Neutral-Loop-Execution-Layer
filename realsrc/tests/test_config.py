@@ -101,3 +101,21 @@ def test_threshold_sanity_checks_fail_closed():
     assert any("EXIT_RESERVE_RATIO" in e for e in errs)
     assert any("HEDGE_REDUCTION_RATIO" in e for e in errs)
     assert any("PORTFOLIO_LIMITS" in e for e in errs)
+
+
+def test_minimal_v32_rejects_deribit_hedge_venue():
+    errs = _with_config(HEDGE_VENUE="DERIBIT")
+
+    assert any("Minimal V32 hedge supports BINANCE only" in e for e in errs)
+
+
+def test_maker_first_reduce_true_is_rejected_if_not_implemented():
+    errs = _with_config(HEDGE_MAKER_FIRST_REDUCE_ENABLED=True)
+
+    assert any("HEDGE_MAKER_FIRST_REDUCE_ENABLED" in e and "must be False" in e
+               for e in errs)
+
+
+def test_v32_policy_switch_is_primary_config_name():
+    assert C.HEDGE_POLICY_V32_ENABLED is True
+    assert C.HEDGE_POLICY_V313_ENABLED == C.HEDGE_POLICY_V32_ENABLED

@@ -15,7 +15,7 @@ _ORIG_ST = {k: getattr(ST, k, _MISSING) for k in (
     "RUN_PROFILE", "ALLOW_ENTRY_TRADING", "ALLOW_EXIT_TRADING", "ALLOW_HEDGE_TRADING",
     "KILL_NEW_RISK", "EMERGENCY_REDUCE_ONLY", "HEDGE_VENUE", "HEDGE_BINANCE_INSTRUMENT",
     "HEDGE_BINANCE_EXCHANGE_INDEX", "HEDGE_REDUCTION_RATIO", "HEDGE_MAX_SLIPPAGE_BPS",
-    "HEDGE_POLICY_V313_ENABLED",
+    "HEDGE_POLICY_V313_ENABLED", "HEDGE_POLICY_V32_ENABLED",
     "dbt_get_positions", "dbt_get_open_orders", "dbt_get_instrument", "exec_hedge_step",
     "bnc_get_position_btc", "bnc_get_position_snapshot", "exec_quote", "_spot_price", "_evaluate_hedge",
     "_evaluate_position_risk_now", "_evaluate_take_profit",
@@ -166,7 +166,7 @@ def test_strategy_hedge_snapshot_carries_binance_unrealized_pnl_to_display():
     _restore()
 
 
-def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized():
+def test_manage_cycle_policy_disabled_does_not_use_legacy_hedge_submit():
     ST.RUN_PROFILE = "LIVE"
     ST.ALLOW_ENTRY_TRADING = False
     ST.ALLOW_EXIT_TRADING = True
@@ -174,6 +174,7 @@ def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized(
     ST.KILL_NEW_RISK = False
     ST.EMERGENCY_REDUCE_ONLY = False
     ST.HEDGE_POLICY_V313_ENABLED = False
+    ST.HEDGE_POLICY_V32_ENABLED = False
     ST.HEDGE_VENUE = "BINANCE"
     ST.HEDGE_REDUCTION_RATIO = 0.5
     now = 1000000
@@ -206,9 +207,8 @@ def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized(
         "filled": 0.0, "dry": True, "reason": "HEDGE_DRYRUN"}
     out = ST.manage_cycle(now)
     assert out["arb"]["preferred_action"] == "EXIT_PREFERRED"
-    assert out["arb"]["executable_action"] == "HEDGE_READY"
-    assert calls and calls[0][0][0]["venue"] == "BINANCE"
-    assert calls[0][1]["execution_style"] == "PROMPT_LIMIT"
+    assert out["arb"]["executable_action"] == "HOLD"
+    assert calls == []
     _restore()
 
 
@@ -220,6 +220,7 @@ def test_manage_cycle_allows_existing_hedge_reduce_when_hedge_gate_off():
     ST.KILL_NEW_RISK = False
     ST.EMERGENCY_REDUCE_ONLY = False
     ST.HEDGE_POLICY_V313_ENABLED = False
+    ST.HEDGE_POLICY_V32_ENABLED = False
     fmz_shim._G(ST._POSITION_KEY, {
         "position_id": "pos-reduce", "side": "CALL", "short_instrument": "S",
         "long_instrument": "P", "remaining_short_qty": 0.10, "long_remaining_qty": 0.10,
@@ -250,6 +251,6 @@ def test_manage_cycle_allows_existing_hedge_reduce_when_hedge_gate_off():
 
     out = ST.manage_cycle(1000000)
 
-    assert out["arb"]["executable_action"] == "HEDGE_READY"
-    assert calls and calls[0][0][3] is True
+    assert out["arb"]["executable_action"] == "HOLD"
+    assert calls == []
     _restore()

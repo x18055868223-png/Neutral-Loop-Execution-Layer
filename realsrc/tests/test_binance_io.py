@@ -72,6 +72,21 @@ class _ContractAwareExchange:
         return True
 
 
+class _PositionNoneExchange(_ContractAwareExchange):
+    def GetPosition(self):
+        return None
+
+
+class _MissingOrderIdExchange(_ContractAwareExchange):
+    def Buy(self, _price, _amount):
+        self.orders.append(("buy", _price, _amount))
+        return {"status": "accepted"}
+
+    def Sell(self, _price, _amount):
+        self.orders.append(("sell", _price, _amount))
+        return {"status": "accepted"}
+
+
 def _restore():
     fmz_shim.exchanges[1] = _ORIG_EX
 
@@ -88,6 +103,16 @@ def test_place_hedge_no_op():
 
 def test_get_position_empty_returns_zero():
     assert B.bnc_get_position_btc("BTCUSDC") == 0.0
+
+
+def test_get_position_none_is_data_gap_not_zero():
+    fake = _PositionNoneExchange()
+    fmz_shim.exchanges[1] = fake
+    try:
+        assert B.bnc_get_position_snapshot("BTCUSDC") is None
+        assert B.bnc_get_position_btc("BTCUSDC") is None
+    finally:
+        _restore()
 
 
 def test_get_position_selects_btc_usdc_swap_contract():
@@ -168,5 +193,31 @@ def test_place_hedge_live_blocks_without_order_lifecycle_methods():
         assert r["reason"] == "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED"
         assert r["blocked"] is True
         assert fake.orders == []
+    finally:
+        _restore()
+
+
+def test_v32_submit_blocks_without_order_lifecycle_methods():
+    fake = _NoLifecycleExchange()
+    fmz_shim.exchanges[1] = fake
+    try:
+        r = B.bnc_submit_hedge_order("BTCUSDC", "sell", 0.01, False, allow_live=True)
+        assert r["reason"] == "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED"
+        assert r["blocked"] is True
+        assert r["order_id"] is None
+        assert fake.orders == []
+    finally:
+        _restore()
+
+
+def test_v32_submit_without_order_id_is_blocked_uncertain_submit():
+    fake = _MissingOrderIdExchange()
+    fmz_shim.exchanges[1] = fake
+    try:
+        r = B.bnc_submit_hedge_order("BTCUSDC", "buy", 0.01, False, allow_live=True)
+        assert r["reason"] == "BINANCE_ORDER_ID_MISSING"
+        assert r["blocked"] is True
+        assert r["order_id"] is None
+        assert fake.orders == [("buy", r["price"], 0.01)]
     finally:
         _restore()

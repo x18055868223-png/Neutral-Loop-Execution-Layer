@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_1.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_2.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.1-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.2-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -67,8 +67,8 @@ This repository contains the current independent execution-layer deliverable onl
   HARD triggers go straight to full target, cooldown/hysteresis reduce
   whipsaw, and each cycle submits at most one Binance hedge order. Active
   partial pending fills now keep single-flight blocking, while terminal/stale
-  resolved fills are mirrored into `hedge_execution_history`. Deribit and
-  `HEDGE_POLICY_V313_ENABLED = False` keep the legacy prompt-limit path.
+  resolved fills are mirrored into `hedge_execution_history`. This historical
+  V313 path was superseded by the V32-only hedge path in v3.2.2.
 - v3.1.5 wires option-settlement reconciliation into startup recovery and
   `POSITION_MANAGE`: after expiry grace and a successful exchange option read,
   absent settled legs are finalized in the local snapshot with
@@ -86,6 +86,12 @@ This repository contains the current independent execution-layer deliverable onl
   archive clears recovery only when no hedge pending remains, no-snapshot orphan
   hedge recovery gets an explicit manual-cleanup read-screen phase, and settled
   shorts no longer produce noisy risk quote gaps.
+- v3.2.2 is the minimal clean V32 hedge-chain closeout: Binance `GetPosition()`
+  returning `None` is a data gap rather than flat zero, V32 hedge submission
+  requires `GetOrder`/`CancelOrder`, live submit responses without an order id
+  enter an unknown-submit guard, the policy state key migrates from V313 to V32,
+  policy-disabled cycles hold instead of falling back to the old submit path,
+  and minimal V32 config rejects Deribit hedge venue plus maker-first reduce.
 
 ## Boundary
 

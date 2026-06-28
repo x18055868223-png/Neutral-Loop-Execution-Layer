@@ -61,7 +61,8 @@ _LAST_COMMAND_KEY = "spm_last_command_v1"
 _LAST = {"plan_ms": 0}
 # 选用方案明细锁定：启动时锁定一个方案的编号，之后不随方案库刷新而改变（重启复位）
 _LOCKED = {"detail_id": None}
-_HEDGE_POLICY_STATE_KEY = "spm_hedge_policy_v313_state"
+_HEDGE_POLICY_STATE_KEY_V313 = "spm_hedge_policy_v313_state"
+_HEDGE_POLICY_STATE_KEY = "spm_hedge_policy_v32_state"
 MANUAL_GATE_ISOLATION_TESTS_PASSED = True
 
 
@@ -1499,7 +1500,7 @@ def _clear_recovery_ok(reason, now_ms):
 
 def _archive_closed(snap, now_ms):
     """P0②：两腿 + 对冲 perp 均归零 → 归档 closed_position_history、清快照、置 CLOSED。"""
-    hedge_state = _G(_HEDGE_POLICY_STATE_KEY) or {}
+    hedge_state = _hedge_policy_load_state_raw() or {}
     if hedge_state.get("pending_order_id"):
         return False
     hist = list(_G(_CLOSED_HISTORY_KEY) or [])
@@ -1984,25 +1985,48 @@ def _hedge_policy_default_state(position_id=None):
         "last_crash_adverse_bps": 0.0,
         "episode_cost_usdc": 0.0,
         "episode_cost_bps": 0.0,
+        "last_submit_unknown_ts": 0,
+        "last_submit_unknown_reason": None,
     }
+
+
+def _hedge_policy_load_state_raw():
+    st = _G(_HEDGE_POLICY_STATE_KEY)
+    if isinstance(st, dict):
+        return st
+    old = _G(_HEDGE_POLICY_STATE_KEY_V313)
+    if isinstance(old, dict):
+        migrated = dict(old)
+        migrated["policy"] = "V32"
+        _G(_HEDGE_POLICY_STATE_KEY, migrated)
+        _G(_HEDGE_POLICY_STATE_KEY_V313, None)
+        return migrated
+    return st
 
 
 def _hedge_policy_state(snap=None):
     pos_id = (snap or {}).get("position_id")
-    st = _G(_HEDGE_POLICY_STATE_KEY)
+    st = _hedge_policy_load_state_raw()
     if not isinstance(st, dict) or st.get("position_id") != pos_id:
         st = _hedge_policy_default_state(pos_id)
         _G(_HEDGE_POLICY_STATE_KEY, st)
+        _G(_HEDGE_POLICY_STATE_KEY_V313, None)
     return dict(st)
 
 
 def _hedge_policy_save_state(st):
     _G(_HEDGE_POLICY_STATE_KEY, dict(st or {}))
+    _G(_HEDGE_POLICY_STATE_KEY_V313, None)
     return st
 
 
+def _hedge_policy_v32_enabled():
+    return bool(globals().get("HEDGE_POLICY_V32_ENABLED",
+                              globals().get("HEDGE_POLICY_V313_ENABLED", True)))
+
+
 def _hedge_policy_enabled_for(hedge):
-    return bool(HEDGE_POLICY_V313_ENABLED and (hedge or {}).get("venue") == "BINANCE")
+    return bool(_hedge_policy_v32_enabled() and (hedge or {}).get("venue") == "BINANCE")
 
 
 def _hedge_policy_order_filled(order):
@@ -2294,7 +2318,15 @@ def _hedge_policy_action(current, eff_target, min_trade, forced_reason=None, dea
 
 def _hedge_policy_plan(snap, hedge, risk, now_ms):
     if not _hedge_policy_enabled_for(hedge):
-        return hedge
+        st = _hedge_policy_state(snap)
+        out = dict(hedge or {})
+        current = out.get("perp_qty")
+        full_target = out.get("target")
+        st["current_hedge_qty"] = current
+        _hedge_policy_save_state(st)
+        return _hedge_policy_hold(out, st, risk, "HOLD",
+                                  "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT",
+                                  full_target, current, current)
     st = _hedge_policy_state(snap)
     pending = _hedge_policy_resolve_pending(st, hedge, risk, now_ms)
     if pending is not None:
@@ -2305,6 +2337,16 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
     full_target = out.get("target")
     min_trade = HEDGE_BINANCE_MIN_TRADE
     warnings = []
+    unknown_ts = st.get("last_submit_unknown_ts") or 0
+    unknown_window_ms = max(0, HEDGE_PENDING_STALE_SECONDS) * 1000
+    if unknown_ts and now_ms - unknown_ts < unknown_window_ms:
+        st["current_hedge_qty"] = current
+        _hedge_policy_save_state(st)
+        return _hedge_policy_hold(out, st, risk, "HOLD", "SUBMIT_UNKNOWN_RECENT",
+                                  full_target, current, current)
+    if unknown_ts:
+        st["last_submit_unknown_ts"] = 0
+        st["last_submit_unknown_reason"] = None
     if out.get("data_gap") == "HEDGE_POSITION_DATA_GAP" or current is None:
         st["current_hedge_qty"] = None
         _hedge_policy_save_state(st)
@@ -2479,8 +2521,16 @@ def _hedge_policy_submit(hedge, now_ms, allow_live=True):
         idx=venue_cfg.get("exchange_index"),
         execution_style=HEDGE_OPEN_EXECUTION_STYLE)
     oid = (result or {}).get("order_id")
+    if (result or {}).get("reason") == "BINANCE_ORDER_ID_MISSING":
+        stored = _hedge_policy_load_state_raw()
+        st = dict(stored) if isinstance(stored, dict) else _hedge_policy_default_state()
+        st["last_submit_unknown_ts"] = now_ms
+        st["last_submit_unknown_reason"] = "BINANCE_ORDER_ID_MISSING"
+        st["pending_order_id"] = None
+        _hedge_policy_save_state(st)
+        return result
     if oid:
-        stored = _G(_HEDGE_POLICY_STATE_KEY)
+        stored = _hedge_policy_load_state_raw()
         st = dict(stored) if isinstance(stored, dict) else _hedge_policy_default_state()
         st["pending_order_id"] = oid
         st["pending_order_side"] = (hedge or {}).get("side")
@@ -2488,6 +2538,8 @@ def _hedge_policy_submit(hedge, now_ms, allow_live=True):
         st["pending_order_created_ts"] = now_ms
         st["pending_is_add"] = not bool(action.get("reduce_only"))
         st["pending_reduce_only"] = bool(action.get("reduce_only"))
+        st["last_submit_unknown_ts"] = 0
+        st["last_submit_unknown_reason"] = None
         st["hedge_epoch"] = (st.get("hedge_epoch") or 0) + 1
         _hedge_policy_save_state(st)
     return result
@@ -3005,10 +3057,10 @@ def manage_cycle(now_ms):
         if _hedge_policy_enabled_for(hedge):
             hedge_step = _hedge_policy_submit(hedge, now_ms, allow_live=True)
         else:
-            hedge_step = exec_hedge_step(hedge["venue_cfg"], hedge["side"], hedge["action"]["delta_contracts"],
-                                         h_reduce, allow_live=True, label="hedge",
-                                         execution_style=HEDGE_OPEN_EXECUTION_STYLE,
-                                         max_slippage_bps=HEDGE_MAX_SLIPPAGE_BPS)
+            hedge_step = {"filled": 0.0, "dry": False,
+                          "venue": hedge.get("venue"),
+                          "reason": "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT",
+                          "blocked": True}
         if hedge_step and not hedge_step.get("dry") and snap \
                 and ((hedge_step.get("filled") or 0) > 0 or not _hedge_policy_enabled_for(hedge)):
             _append_execution_history(snap, "hedge_execution_history", hedge_step, now_ms)

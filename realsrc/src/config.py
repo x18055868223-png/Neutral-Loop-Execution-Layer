@@ -9,7 +9,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.1-manual-gate"
+STRATEGY_VERSION = "3.2.2-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -90,14 +90,16 @@ HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退
 HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
-HEDGE_VENUE = "BINANCE"            # BINANCE | DERIBIT
+HEDGE_VENUE = "BINANCE"            # Minimal V32 hedge supports BINANCE only
 HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"   # 交易员配置仍写 BTCUSDC；FMZ 内部会切 BTC_USDC + swap
 HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性)
 HEDGE_BINANCE_PRICE_TICK = 0.1         # BTCUSDC 永续限价价格最小跳动；买入向上、卖出向下取整
 HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
 
-# ===== Binance hedge controller V32 policy (reuses V313 reconciliation) =====
-HEDGE_POLICY_V313_ENABLED = True
+# ===== Binance hedge controller V32 policy =====
+HEDGE_POLICY_V32_ENABLED = True
+# Compatibility alias for older tests/docs; V32 is the primary switch.
+HEDGE_POLICY_V313_ENABLED = HEDGE_POLICY_V32_ENABLED
 HEDGE_STAGING_ENABLED = True
 HEDGE_HYSTERESIS_ENABLED = True
 HEDGE_COOLDOWN_ENABLED = True
@@ -118,7 +120,7 @@ HEDGE_CRASH_ENABLED = True
 HEDGE_CRASH_SPEED_WINDOW_SECONDS = 600
 HEDGE_CRASH_MOVE_BPS = 110
 HEDGE_MAKER_FIRST_REDUCE_ENABLED = False
-HEDGE_SOFT_PERSIST_SECONDS = 20
+HEDGE_SOFT_PERSIST_SECONDS = 60
 HEDGE_REDUCE_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PROB_BUFFER = 0.05
 HEDGE_ADD_COOLDOWN_SECONDS = 30
@@ -264,8 +266,13 @@ def validate_config():
         errs.append("HEDGE_CRASH_MOVE_BPS must be >= 0")
     if not isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, (int, float)) or isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, bool) or HEDGE_CRASH_SPEED_WINDOW_SECONDS <= 0:
         errs.append("HEDGE_CRASH_SPEED_WINDOW_SECONDS must be > 0")
-    if not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool) or not isinstance(HEDGE_CRASH_ENABLED, bool) or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool):
-        errs.append("HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
+    if (not isinstance(HEDGE_POLICY_V32_ENABLED, bool)
+            or not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool)
+            or not isinstance(HEDGE_CRASH_ENABLED, bool)
+            or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool)):
+        errs.append("HEDGE_POLICY_V32_ENABLED/HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
+    if HEDGE_MAKER_FIRST_REDUCE_ENABLED is not False:
+        errs.append("HEDGE_MAKER_FIRST_REDUCE_ENABLED is not implemented in minimal V32; must be False")
     required_limits = (
         "max_open_positions",
         "max_short_gamma",
@@ -280,8 +287,8 @@ def validate_config():
             limit = PORTFOLIO_LIMITS.get(key)
             if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit < 0:
                 errs.append("PORTFOLIO_LIMITS.%s must be a non-negative number" % key)
-    if HEDGE_VENUE not in ("DERIBIT", "BINANCE"):
-        errs.append("HEDGE_VENUE must be DERIBIT or BINANCE")
+    if HEDGE_VENUE != "BINANCE":
+        errs.append("Minimal V32 hedge supports BINANCE only")
     if ENTRY_MAX_ATTEMPTS < 1 or ENTRY_MAX_TICK_STEPS < 0:
         errs.append("ENTRY_MAX_ATTEMPTS>=1 and ENTRY_MAX_TICK_STEPS>=0")
     if ENTRY_PROTECTION_TAKER_AFTER_SECONDS < 1 or ENTRY_SHORT_ORDER_WAIT_SECONDS < 1:

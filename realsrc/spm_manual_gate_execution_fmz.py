@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.1-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.2-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.1-manual-gate"
+STRATEGY_VERSION = "3.2.2-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -96,14 +96,16 @@ HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退
 HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
-HEDGE_VENUE = "BINANCE"            # BINANCE | DERIBIT
+HEDGE_VENUE = "BINANCE"            # Minimal V32 hedge supports BINANCE only
 HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"   # 交易员配置仍写 BTCUSDC；FMZ 内部会切 BTC_USDC + swap
 HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性)
 HEDGE_BINANCE_PRICE_TICK = 0.1         # BTCUSDC 永续限价价格最小跳动；买入向上、卖出向下取整
 HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
 
-# ===== Binance hedge controller V32 policy (reuses V313 reconciliation) =====
-HEDGE_POLICY_V313_ENABLED = True
+# ===== Binance hedge controller V32 policy =====
+HEDGE_POLICY_V32_ENABLED = True
+# Compatibility alias for older tests/docs; V32 is the primary switch.
+HEDGE_POLICY_V313_ENABLED = HEDGE_POLICY_V32_ENABLED
 HEDGE_STAGING_ENABLED = True
 HEDGE_HYSTERESIS_ENABLED = True
 HEDGE_COOLDOWN_ENABLED = True
@@ -124,7 +126,7 @@ HEDGE_CRASH_ENABLED = True
 HEDGE_CRASH_SPEED_WINDOW_SECONDS = 600
 HEDGE_CRASH_MOVE_BPS = 110
 HEDGE_MAKER_FIRST_REDUCE_ENABLED = False
-HEDGE_SOFT_PERSIST_SECONDS = 20
+HEDGE_SOFT_PERSIST_SECONDS = 60
 HEDGE_REDUCE_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PROB_BUFFER = 0.05
 HEDGE_ADD_COOLDOWN_SECONDS = 30
@@ -270,8 +272,13 @@ def validate_config():
         errs.append("HEDGE_CRASH_MOVE_BPS must be >= 0")
     if not isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, (int, float)) or isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, bool) or HEDGE_CRASH_SPEED_WINDOW_SECONDS <= 0:
         errs.append("HEDGE_CRASH_SPEED_WINDOW_SECONDS must be > 0")
-    if not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool) or not isinstance(HEDGE_CRASH_ENABLED, bool) or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool):
-        errs.append("HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
+    if (not isinstance(HEDGE_POLICY_V32_ENABLED, bool)
+            or not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool)
+            or not isinstance(HEDGE_CRASH_ENABLED, bool)
+            or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool)):
+        errs.append("HEDGE_POLICY_V32_ENABLED/HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
+    if HEDGE_MAKER_FIRST_REDUCE_ENABLED is not False:
+        errs.append("HEDGE_MAKER_FIRST_REDUCE_ENABLED is not implemented in minimal V32; must be False")
     required_limits = (
         "max_open_positions",
         "max_short_gamma",
@@ -286,8 +293,8 @@ def validate_config():
             limit = PORTFOLIO_LIMITS.get(key)
             if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit < 0:
                 errs.append("PORTFOLIO_LIMITS.%s must be a non-negative number" % key)
-    if HEDGE_VENUE not in ("DERIBIT", "BINANCE"):
-        errs.append("HEDGE_VENUE must be DERIBIT or BINANCE")
+    if HEDGE_VENUE != "BINANCE":
+        errs.append("Minimal V32 hedge supports BINANCE only")
     if ENTRY_MAX_ATTEMPTS < 1 or ENTRY_MAX_TICK_STEPS < 0:
         errs.append("ENTRY_MAX_ATTEMPTS>=1 and ENTRY_MAX_TICK_STEPS>=0")
     if ENTRY_PROTECTION_TAKER_AFTER_SECONDS < 1 or ENTRY_SHORT_ORDER_WAIT_SECONDS < 1:
@@ -1409,7 +1416,11 @@ def bnc_get_position_snapshot(symbol, idx=None):
         net = 0.0
         pnl = 0.0
         pnl_seen = False
-        positions = list(ex.GetPosition() or [])
+        raw_positions = ex.GetPosition()
+        if raw_positions is None:
+            Log("[binance] GetPosition 返回 None，按数据缺口处理")
+            return None
+        positions = list(raw_positions or [])
         for p in positions:
             amt = p.get("Amount") or 0.0
             long_side = p.get("Type") in (0, "buy", "long", "Long")
@@ -1543,10 +1554,12 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
     if ex is None:
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "reason": "BINANCE_EXCHANGE_UNAVAILABLE"}
-    missing = _missing_methods(ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell"))
+    missing = _missing_methods(
+        ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell",
+             "GetOrder", "CancelOrder"))
     if missing:
         return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_ORDER_SUBMIT_UNSUPPORTED",
+                "reason": "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
                 "blocked": True, "missing_methods": missing}
     try:
         pair, contract_type = _select_binance_perp(ex, symbol)
@@ -1561,6 +1574,14 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
         ex.SetDirection(direction)
         resp = ex.Buy(price, amount) if side == "buy" else ex.Sell(price, amount)
         oid = _order_id(resp)
+        if oid is None:
+            return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
+                    "symbol": symbol, "side": side, "amount": amount, "price": price,
+                    "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
+                    "order": resp, "reduce_only": reduce_only, "post_only": False,
+                    "execution_style": execution_style, "cross_bps": cross_bps,
+                    "pair": pair, "contract_type": contract_type,
+                    "reason": "BINANCE_ORDER_ID_MISSING", "blocked": True}
         return {"order_id": oid, "filled": 0.0, "dry": False, "venue": "BINANCE",
                 "symbol": symbol, "side": side, "amount": amount, "price": price,
                 "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
@@ -5386,7 +5407,8 @@ _LAST_COMMAND_KEY = "spm_last_command_v1"
 _LAST = {"plan_ms": 0}
 # 选用方案明细锁定：启动时锁定一个方案的编号，之后不随方案库刷新而改变（重启复位）
 _LOCKED = {"detail_id": None}
-_HEDGE_POLICY_STATE_KEY = "spm_hedge_policy_v313_state"
+_HEDGE_POLICY_STATE_KEY_V313 = "spm_hedge_policy_v313_state"
+_HEDGE_POLICY_STATE_KEY = "spm_hedge_policy_v32_state"
 MANUAL_GATE_ISOLATION_TESTS_PASSED = True
 
 
@@ -6824,7 +6846,7 @@ def _clear_recovery_ok(reason, now_ms):
 
 def _archive_closed(snap, now_ms):
     """P0②：两腿 + 对冲 perp 均归零 → 归档 closed_position_history、清快照、置 CLOSED。"""
-    hedge_state = _G(_HEDGE_POLICY_STATE_KEY) or {}
+    hedge_state = _hedge_policy_load_state_raw() or {}
     if hedge_state.get("pending_order_id"):
         return False
     hist = list(_G(_CLOSED_HISTORY_KEY) or [])
@@ -7309,25 +7331,48 @@ def _hedge_policy_default_state(position_id=None):
         "last_crash_adverse_bps": 0.0,
         "episode_cost_usdc": 0.0,
         "episode_cost_bps": 0.0,
+        "last_submit_unknown_ts": 0,
+        "last_submit_unknown_reason": None,
     }
+
+
+def _hedge_policy_load_state_raw():
+    st = _G(_HEDGE_POLICY_STATE_KEY)
+    if isinstance(st, dict):
+        return st
+    old = _G(_HEDGE_POLICY_STATE_KEY_V313)
+    if isinstance(old, dict):
+        migrated = dict(old)
+        migrated["policy"] = "V32"
+        _G(_HEDGE_POLICY_STATE_KEY, migrated)
+        _G(_HEDGE_POLICY_STATE_KEY_V313, None)
+        return migrated
+    return st
 
 
 def _hedge_policy_state(snap=None):
     pos_id = (snap or {}).get("position_id")
-    st = _G(_HEDGE_POLICY_STATE_KEY)
+    st = _hedge_policy_load_state_raw()
     if not isinstance(st, dict) or st.get("position_id") != pos_id:
         st = _hedge_policy_default_state(pos_id)
         _G(_HEDGE_POLICY_STATE_KEY, st)
+        _G(_HEDGE_POLICY_STATE_KEY_V313, None)
     return dict(st)
 
 
 def _hedge_policy_save_state(st):
     _G(_HEDGE_POLICY_STATE_KEY, dict(st or {}))
+    _G(_HEDGE_POLICY_STATE_KEY_V313, None)
     return st
 
 
+def _hedge_policy_v32_enabled():
+    return bool(globals().get("HEDGE_POLICY_V32_ENABLED",
+                              globals().get("HEDGE_POLICY_V313_ENABLED", True)))
+
+
 def _hedge_policy_enabled_for(hedge):
-    return bool(HEDGE_POLICY_V313_ENABLED and (hedge or {}).get("venue") == "BINANCE")
+    return bool(_hedge_policy_v32_enabled() and (hedge or {}).get("venue") == "BINANCE")
 
 
 def _hedge_policy_order_filled(order):
@@ -7619,7 +7664,15 @@ def _hedge_policy_action(current, eff_target, min_trade, forced_reason=None, dea
 
 def _hedge_policy_plan(snap, hedge, risk, now_ms):
     if not _hedge_policy_enabled_for(hedge):
-        return hedge
+        st = _hedge_policy_state(snap)
+        out = dict(hedge or {})
+        current = out.get("perp_qty")
+        full_target = out.get("target")
+        st["current_hedge_qty"] = current
+        _hedge_policy_save_state(st)
+        return _hedge_policy_hold(out, st, risk, "HOLD",
+                                  "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT",
+                                  full_target, current, current)
     st = _hedge_policy_state(snap)
     pending = _hedge_policy_resolve_pending(st, hedge, risk, now_ms)
     if pending is not None:
@@ -7630,6 +7683,16 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
     full_target = out.get("target")
     min_trade = HEDGE_BINANCE_MIN_TRADE
     warnings = []
+    unknown_ts = st.get("last_submit_unknown_ts") or 0
+    unknown_window_ms = max(0, HEDGE_PENDING_STALE_SECONDS) * 1000
+    if unknown_ts and now_ms - unknown_ts < unknown_window_ms:
+        st["current_hedge_qty"] = current
+        _hedge_policy_save_state(st)
+        return _hedge_policy_hold(out, st, risk, "HOLD", "SUBMIT_UNKNOWN_RECENT",
+                                  full_target, current, current)
+    if unknown_ts:
+        st["last_submit_unknown_ts"] = 0
+        st["last_submit_unknown_reason"] = None
     if out.get("data_gap") == "HEDGE_POSITION_DATA_GAP" or current is None:
         st["current_hedge_qty"] = None
         _hedge_policy_save_state(st)
@@ -7804,8 +7867,16 @@ def _hedge_policy_submit(hedge, now_ms, allow_live=True):
         idx=venue_cfg.get("exchange_index"),
         execution_style=HEDGE_OPEN_EXECUTION_STYLE)
     oid = (result or {}).get("order_id")
+    if (result or {}).get("reason") == "BINANCE_ORDER_ID_MISSING":
+        stored = _hedge_policy_load_state_raw()
+        st = dict(stored) if isinstance(stored, dict) else _hedge_policy_default_state()
+        st["last_submit_unknown_ts"] = now_ms
+        st["last_submit_unknown_reason"] = "BINANCE_ORDER_ID_MISSING"
+        st["pending_order_id"] = None
+        _hedge_policy_save_state(st)
+        return result
     if oid:
-        stored = _G(_HEDGE_POLICY_STATE_KEY)
+        stored = _hedge_policy_load_state_raw()
         st = dict(stored) if isinstance(stored, dict) else _hedge_policy_default_state()
         st["pending_order_id"] = oid
         st["pending_order_side"] = (hedge or {}).get("side")
@@ -7813,6 +7884,8 @@ def _hedge_policy_submit(hedge, now_ms, allow_live=True):
         st["pending_order_created_ts"] = now_ms
         st["pending_is_add"] = not bool(action.get("reduce_only"))
         st["pending_reduce_only"] = bool(action.get("reduce_only"))
+        st["last_submit_unknown_ts"] = 0
+        st["last_submit_unknown_reason"] = None
         st["hedge_epoch"] = (st.get("hedge_epoch") or 0) + 1
         _hedge_policy_save_state(st)
     return result
@@ -8330,10 +8403,10 @@ def manage_cycle(now_ms):
         if _hedge_policy_enabled_for(hedge):
             hedge_step = _hedge_policy_submit(hedge, now_ms, allow_live=True)
         else:
-            hedge_step = exec_hedge_step(hedge["venue_cfg"], hedge["side"], hedge["action"]["delta_contracts"],
-                                         h_reduce, allow_live=True, label="hedge",
-                                         execution_style=HEDGE_OPEN_EXECUTION_STYLE,
-                                         max_slippage_bps=HEDGE_MAX_SLIPPAGE_BPS)
+            hedge_step = {"filled": 0.0, "dry": False,
+                          "venue": hedge.get("venue"),
+                          "reason": "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT",
+                          "blocked": True}
         if hedge_step and not hedge_step.get("dry") and snap \
                 and ((hedge_step.get("filled") or 0) > 0 or not _hedge_policy_enabled_for(hedge)):
             _append_execution_history(snap, "hedge_execution_history", hedge_step, now_ms)
