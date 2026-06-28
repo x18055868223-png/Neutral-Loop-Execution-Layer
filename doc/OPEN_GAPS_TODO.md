@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.5-manual-gate`
+- Latest completed release: `3.2.6-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -80,12 +80,16 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   inputs instead of defaulting missing values to zero. Missing proposed Greeks
   now block through `BUDGET_INPUT_INCOMPLETE`.
 
+## Closed In v3.2.6
+
+- [x] P1: no-snapshot orphan hedge policy decision.
+  The permanent policy is `MANUAL_CLEANUP_ONLY`: no-snapshot external perp
+  exposure keeps the explicit `ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED` phase and
+  exposes `auto_cleanup_allowed=False`, so the runtime does not auto-close an
+  orphan hedge without ownership evidence.
+
 ## Must Fix Next
 
-- [ ] P1: no-snapshot orphan hedge policy decision.
-  v3.2.1 chose safe manual cleanup display. Later decide whether to keep this
-  as the permanent policy or add ownership-proven reduce-only cleanup with
-  explicit config and tests.
 - [ ] P1: decide whether to delete legacy hedge helper paths after one more
   reference audit. v3.2.2 prevents production fallback, but `bnc_place_hedge()`
   and `exec_hedge_step()` still exist for isolated tests / Deribit execution

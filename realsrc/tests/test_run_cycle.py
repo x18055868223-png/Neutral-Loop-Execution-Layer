@@ -168,6 +168,8 @@ def test_orphan_hedge_without_snapshot_has_explicit_manual_cleanup_phase():
     assert ctx["console_phase"] == "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED"
     assert ctx["recovery_state"] == "ORPHAN_HEDGE_EMERGENCY"
     assert ctx["orphan_hedge_cleanup"]["suggested_side"] == "sell"
+    assert ctx["orphan_hedge_cleanup"]["policy"] == "MANUAL_CLEANUP_ONLY"
+    assert ctx["orphan_hedge_cleanup"]["auto_cleanup_allowed"] is False
 
 
 def test_run_cycle_vrp_context_builds_library_then_locks():

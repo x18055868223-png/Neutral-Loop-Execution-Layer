@@ -1810,7 +1810,9 @@ def _orphan_hedge_cleanup_detail(recovery):
             side = "buy"
     return {
         "state": recovery.get("state") or "ORPHAN_HEDGE_EMERGENCY",
+        "policy": "MANUAL_CLEANUP_ONLY",
         "mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+        "auto_cleanup_allowed": False,
         "venue": recovery.get("venue") or HEDGE_VENUE,
         "instrument": recovery.get("instrument") or (
             HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE" else HEDGE_INSTRUMENT),
