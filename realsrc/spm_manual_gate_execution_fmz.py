@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.8-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.9-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.8-manual-gate"
+STRATEGY_VERSION = "3.2.9-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -120,6 +120,7 @@ HEDGE_GAMMA_AWARE_ENABLED = True
 HEDGE_GAMMA_FRAC_FLOOR = 0.30
 HEDGE_GAMMA_NORM_REF = 1_000_000.0
 HEDGE_REBALANCE_BAND_FRAC = 0.20
+HEDGE_MARGIN_RESERVE_RATE = 0.10
 HEDGE_MIN_HOLD_SECONDS = 720
 HEDGE_FINAL3H_MODE = "SUPPRESS_SOFT_ADD"
 HEDGE_CRASH_ENABLED = True
@@ -264,6 +265,8 @@ def validate_config():
         errs.append("HEDGE_GAMMA_NORM_REF must be > 0")
     if not (0 <= HEDGE_REBALANCE_BAND_FRAC <= 1):
         errs.append("HEDGE_REBALANCE_BAND_FRAC must be in [0,1]")
+    if not isinstance(HEDGE_MARGIN_RESERVE_RATE, (int, float)) or isinstance(HEDGE_MARGIN_RESERVE_RATE, bool) or HEDGE_MARGIN_RESERVE_RATE < 0:
+        errs.append("HEDGE_MARGIN_RESERVE_RATE must be a non-negative number")
     if not isinstance(HEDGE_MIN_HOLD_SECONDS, (int, float)) or isinstance(HEDGE_MIN_HOLD_SECONDS, bool) or HEDGE_MIN_HOLD_SECONDS < 0:
         errs.append("HEDGE_MIN_HOLD_SECONDS must be >= 0")
     if HEDGE_FINAL3H_MODE not in ("NORMAL", "SUPPRESS_SOFT_ADD"):
@@ -6232,6 +6235,7 @@ def _current_portfolio():
         "short_vega": short_vega,
         "margin_used": margin_used,
         "margin_used_source": margin_source,
+        "account_equity": _account_equity(account),
         "option_position_count": open_positions,
     }
 
@@ -6271,6 +6275,14 @@ def _account_margin_used(account):
     if equity is not None and equity > 0.0:
         return initial_margin / equity, "initial_margin/equity"
     return initial_margin, "initial_margin"
+
+
+def _account_equity(account):
+    for key in ("equity", "margin_balance", "balance"):
+        value = _portfolio_float((account or {}).get(key))
+        if value is not None and value > 0.0:
+            return value
+    return None
 
 
 def _position_size(pos):
@@ -6426,6 +6438,23 @@ def _vrp_recheck_locked(locked, spot, amount, short_quote, protection_quote, man
     return None, {"error": "VRP_CONTEXT_UNSUPPORTED"}
 
 
+def _precommit_hedge_margin_reserve(amount, short_quote, protection_quote, current_portfolio):
+    net_delta = option_net_delta(
+        amount,
+        (short_quote or {}).get("delta"),
+        amount,
+        (protection_quote or {}).get("delta"))
+    if net_delta is None:
+        return None
+    reserve = abs(net_delta) * HEDGE_MARGIN_RESERVE_RATE
+    if (current_portfolio or {}).get("margin_used_source") == "initial_margin/equity":
+        equity = _portfolio_float((current_portfolio or {}).get("account_equity"))
+        if equity is None or equity <= 0.0:
+            return None
+        return reserve / equity
+    return reserve
+
+
 def _build_precommit_live(locked, spot, manual_context, now_ms):
     """预取实时复核数据供 evaluate_precommit_checks。
     VRP 需执行侧 manual_context.market_context；缺失时 vrp_pass=None（fail-closed）。"""
@@ -6453,15 +6482,16 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
     }, _execution_feasibility_cfg())
     spm = spm_simulate_structure(SETTLEMENT_CURRENCY, short_i, long_i, amount)
     relief = (spm or {}).get("relief_ratio")
+    current_portfolio = _current_portfolio()
+    hedge_margin_reserve = _precommit_hedge_margin_reserve(amount, sq, lq, current_portfolio)
     proposed = {
         "short_gamma": (sq or {}).get("gamma"),
         "short_vega": (sq or {}).get("vega"),
         "structure_margin": (spm or {}).get("im_with_protection"),
         "max_spread_loss": locked.get("max_loss"),
-        "hedge_margin_reserve": 0.0,             # E7 接对冲保证金估算
+        "hedge_margin_reserve": hedge_margin_reserve,
         "fee_reserve": fee_reserve,
     }
-    current_portfolio = _current_portfolio()
     if (current_portfolio or {}).get("data_gap"):
         budget = _current_portfolio_gap_budget(current_portfolio)
     else:
@@ -6482,6 +6512,7 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
         "quotes_fresh": quotes_fresh,
         "net_credit_after_costs": net_credit,
         "projected_budget_decision": budget.get("decision"),
+        "hedge_margin_reserve": hedge_margin_reserve,
         "current_portfolio": current_portfolio,
         "current_portfolio_data_gap": (current_portfolio or {}).get("data_gap"),
         "ledger_reconciled": reconciled,

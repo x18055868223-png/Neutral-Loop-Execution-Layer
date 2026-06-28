@@ -94,12 +94,14 @@ def test_threshold_sanity_checks_fail_closed():
         RISK_EXIT_MAX_SPEND=-0.1,
         EXIT_RESERVE_RATIO=1.0,
         HEDGE_REDUCTION_RATIO=0.0,
+        HEDGE_MARGIN_RESERVE_RATE=-0.1,
         PORTFOLIO_LIMITS={"max_open_positions": 1, "max_margin": -0.1},
     )
 
     assert any("RISK_EXIT_MAX_SPEND" in e for e in errs)
     assert any("EXIT_RESERVE_RATIO" in e for e in errs)
     assert any("HEDGE_REDUCTION_RATIO" in e for e in errs)
+    assert any("HEDGE_MARGIN_RESERVE_RATE" in e for e in errs)
     assert any("PORTFOLIO_LIMITS" in e for e in errs)
 
 

@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.8-manual-gate`
+- Latest completed release: `3.2.9-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -105,11 +105,16 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `exec_hedge_step()`, while live Binance hedge execution remains fail-closed
   outside the V32 pending-first reconciliation path.
 
+## Closed In v3.2.9
+
+- [x] P1: replace the remaining precommit hedge margin reserve placeholder.
+  `_build_precommit_live()` now derives `hedge_margin_reserve` from proposed
+  option net delta and `HEDGE_MARGIN_RESERVE_RATE`, normalizing by account
+  equity when current margin usage is equity-ratio based. Missing delta or
+  equity inputs fail closed through the existing projected-budget package.
+
 ## Must Fix Next
 
-- [ ] P1: review remaining placeholder budget reserve:
-  `hedge_margin_reserve = 0.0` in precommit live data is still not an
-  acceptable long-term risk input.
 - [ ] P1: remove or rewrite stale current docs that still describe
   authorization prompts as runtime behavior. Historical handoffs may remain,
   but current continuation docs should state confirmation-code-only

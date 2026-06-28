@@ -9,7 +9,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.8-manual-gate"
+STRATEGY_VERSION = "3.2.9-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -114,6 +114,7 @@ HEDGE_GAMMA_AWARE_ENABLED = True
 HEDGE_GAMMA_FRAC_FLOOR = 0.30
 HEDGE_GAMMA_NORM_REF = 1_000_000.0
 HEDGE_REBALANCE_BAND_FRAC = 0.20
+HEDGE_MARGIN_RESERVE_RATE = 0.10
 HEDGE_MIN_HOLD_SECONDS = 720
 HEDGE_FINAL3H_MODE = "SUPPRESS_SOFT_ADD"
 HEDGE_CRASH_ENABLED = True
@@ -258,6 +259,8 @@ def validate_config():
         errs.append("HEDGE_GAMMA_NORM_REF must be > 0")
     if not (0 <= HEDGE_REBALANCE_BAND_FRAC <= 1):
         errs.append("HEDGE_REBALANCE_BAND_FRAC must be in [0,1]")
+    if not isinstance(HEDGE_MARGIN_RESERVE_RATE, (int, float)) or isinstance(HEDGE_MARGIN_RESERVE_RATE, bool) or HEDGE_MARGIN_RESERVE_RATE < 0:
+        errs.append("HEDGE_MARGIN_RESERVE_RATE must be a non-negative number")
     if not isinstance(HEDGE_MIN_HOLD_SECONDS, (int, float)) or isinstance(HEDGE_MIN_HOLD_SECONDS, bool) or HEDGE_MIN_HOLD_SECONDS < 0:
         errs.append("HEDGE_MIN_HOLD_SECONDS must be >= 0")
     if HEDGE_FINAL3H_MODE not in ("NORMAL", "SUPPRESS_SOFT_ADD"):

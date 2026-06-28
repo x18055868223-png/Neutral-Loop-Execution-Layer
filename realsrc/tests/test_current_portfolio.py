@@ -123,6 +123,7 @@ def test_precommit_budget_blocks_when_current_portfolio_has_data_gap():
         "best_bid": 0.0029,
         "best_ask": 0.0031,
         "tick": 0.0001,
+        "delta": -0.30,
         "gamma": 0.0001,
     }
     locked = {
@@ -173,6 +174,7 @@ def test_precommit_budget_blocks_when_proposed_short_vega_missing():
         "best_bid": 0.0029,
         "best_ask": 0.0031,
         "tick": 0.0001,
+        "delta": -0.30,
         "gamma": 0.0001,
     }
     locked = {
@@ -219,3 +221,72 @@ def test_precommit_budget_blocks_when_proposed_short_vega_missing():
     assert live["projected_budget_decision"] == "BLOCK"
     assert live["_budget"]["fail_closed"] is True
     assert "BUDGET_INPUT_INCOMPLETE:short_vega" in live["_budget"]["reason_codes"]
+
+
+def test_precommit_budget_includes_hedge_margin_reserve_from_net_delta():
+    _clear()
+    quotes = {
+        "BTC-X-90000-P": {
+            "mark": 0.003,
+            "best_bid": 0.0029,
+            "best_ask": 0.0031,
+            "tick": 0.0001,
+            "delta": -0.30,
+            "gamma": 0.0001,
+            "vega": 0.12,
+        },
+        "BTC-X-87500-P": {
+            "mark": 0.001,
+            "best_bid": 0.0009,
+            "best_ask": 0.0011,
+            "tick": 0.0001,
+            "delta": -0.10,
+            "gamma": 0.00002,
+            "vega": 0.04,
+        },
+    }
+    locked = {
+        "short_instrument": "BTC-X-90000-P",
+        "long_instrument": "BTC-X-87500-P",
+        "amount": 0.1,
+        "max_loss": 0.01,
+        "side": "PUT",
+    }
+    manual_context = {
+        "direction_bias": "SHORT_PUT",
+        "expires_ts_ms": NOW + 60_000,
+        "planning_scope": {},
+        "risk_policy": {},
+        "market_context": {
+            "source": "GEX_MONITOR_IV_RV_RANK",
+            "side": "SHORT_PUT",
+            "iv_rv_ratio": 1.2,
+            "iv_rv_rank_pct": 70,
+        },
+    }
+    old = _patch(
+        exec_quote=lambda inst: dict(quotes[inst]),
+        spm_simulate_structure=lambda *_args, **_kwargs: {
+            "im_with_protection": 0.01,
+            "relief_ratio": 0.2,
+        },
+        ledger_reconcile=lambda _currency: {"actual": {}, "expected": {}},
+        validate_manual_context=lambda _ctx, _now: {"valid": True},
+        _current_portfolio=lambda: {
+            "data_gap": None,
+            "open_positions": 0,
+            "short_gamma": 0.0,
+            "short_vega": 0.0,
+            "margin_used": 0.0,
+            "margin_used_source": "initial_margin/equity",
+            "account_equity": 1.0,
+        },
+        dbt_get_open_orders=lambda _currency: [],
+    )
+    try:
+        live = ST._build_precommit_live(locked, 88000.0, manual_context, NOW)
+    finally:
+        _restore(old)
+
+    assert abs(live["hedge_margin_reserve"] - 0.002) < 1e-12
+    assert live["_budget"]["projected"]["margin_used"] >= 0.012
