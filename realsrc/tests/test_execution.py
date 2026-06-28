@@ -214,6 +214,22 @@ def test_hedge_step_deribit_confirms_fill():
     _restore_ex()
 
 
+def test_hedge_step_binance_live_disabled_legacy_path():
+    calls = []
+    orig = EX.bnc_place_hedge
+    EX.bnc_place_hedge = lambda *a, **k: calls.append((a, k)) or {
+        "filled": 1.0, "reason": "SHOULD_NOT_CALL_LEGACY"}
+    try:
+        vcfg = {"venue": "BINANCE", "instrument": "BTCUSDC", "exchange_index": 1}
+        r = EX.exec_hedge_step(vcfg, "buy", 0.01, reduce_only=False, allow_live=True)
+        assert r["reason"] == "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"
+        assert r["blocked"] is True
+        assert calls == []
+    finally:
+        EX.bnc_place_hedge = orig
+        _restore_ex()
+
+
 def test_entry_campaign_step_returns_fill_accounting_details():
     quotes = {
         "P": {"mark_price": 0.0010, "best_bid_price": 0.0009,

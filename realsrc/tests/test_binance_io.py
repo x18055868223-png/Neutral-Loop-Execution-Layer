@@ -144,27 +144,27 @@ def test_get_position_snapshot_includes_unrealized_pnl():
         _restore()
 
 
-def test_place_hedge_selects_btc_usdc_swap_contract():
+def test_v32_submit_selects_btc_usdc_swap_contract():
     fake = _ContractAwareExchange()
     fmz_shim.exchanges[1] = fake
     try:
-        r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, allow_live=True)
-        assert r["reason"] == "BINANCE_HEDGE_STEP"
+        r = B.bnc_submit_hedge_order("BTCUSDC", "buy", 0.01, False, allow_live=True)
+        assert r["reason"] == "BINANCE_HEDGE_SUBMITTED"
         assert fake.io_calls == [("currency", "BTC_USDC")]
         assert fake.contracts == ["swap"]
     finally:
         _restore()
 
 
-def test_place_hedge_rounds_binance_price_tick_by_side():
+def test_v32_submit_rounds_binance_price_tick_by_side():
     fake = _ContractAwareExchange()
     fake.ticker = {"Buy": 59968.6007, "Sell": 60067.91895}
     fmz_shim.exchanges[1] = fake
     try:
-        buy = B.bnc_place_hedge("BTCUSDC", "buy", 0.001, False,
-                                allow_live=True, max_slippage_bps=0)
-        sell = B.bnc_place_hedge("BTCUSDC", "sell", 0.001, True,
-                                 allow_live=True, max_slippage_bps=0)
+        buy = B.bnc_submit_hedge_order("BTCUSDC", "buy", 0.001, False,
+                                       allow_live=True, cross_bps=0)
+        sell = B.bnc_submit_hedge_order("BTCUSDC", "sell", 0.001, True,
+                                        allow_live=True, cross_bps=0)
         assert buy["price"] == 60068.0
         assert sell["price"] == 59968.6
         assert fake.orders[0] == ("buy", 60068.0, 0.001)
@@ -173,24 +173,24 @@ def test_place_hedge_rounds_binance_price_tick_by_side():
         _restore()
 
 
-def test_place_hedge_live_submits_via_exchange():
+def test_legacy_place_hedge_live_is_disabled():
     fmz_shim.exchanges[1].ticker = {"Buy": 73000.0, "Sell": 73010.0}
     try:
         r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, allow_live=True)
-        assert r["venue"] == "BINANCE" and r["reason"] == "BINANCE_HEDGE_STEP"
-        # reduce_only 平仓方向
-        r2 = B.bnc_place_hedge("BTCUSDC", "sell", 0.01, True, allow_live=True)
-        assert r2["reduce_only"] is True
+        assert r["venue"] == "BINANCE"
+        assert r["reason"] == "LEGACY_HEDGE_HELPER_LIVE_DISABLED"
+        assert r["blocked"] is True
+        assert r["order_id"] is None
     finally:
         fmz_shim.exchanges[1].ticker = {}
 
 
-def test_place_hedge_live_blocks_without_order_lifecycle_methods():
+def test_legacy_place_hedge_live_does_not_probe_exchange():
     fake = _NoLifecycleExchange()
     fmz_shim.exchanges[1] = fake
     try:
         r = B.bnc_place_hedge("BTCUSDC", "buy", 0.01, False, allow_live=True)
-        assert r["reason"] == "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED"
+        assert r["reason"] == "LEGACY_HEDGE_HELPER_LIVE_DISABLED"
         assert r["blocked"] is True
         assert fake.orders == []
     finally:

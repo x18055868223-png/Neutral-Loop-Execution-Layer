@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.6-manual-gate`
+- Latest completed release: `3.2.7-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -88,12 +88,24 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   exposes `auto_cleanup_allowed=False`, so the runtime does not auto-close an
   orphan hedge without ownership evidence.
 
+## Closed In v3.2.7
+
+- [x] P1: legacy Binance hedge helper exposure.
+  `bnc_place_hedge()` is now dry-run/test-only for Binance and live calls return
+  `LEGACY_HEDGE_HELPER_LIVE_DISABLED` without probing the exchange. The
+  `exec_hedge_step()` Binance branch no longer bridges to the helper in live
+  mode and returns `HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT`; V32 live hedge
+  submits stay on `bnc_submit_hedge_order()` and pending-first reconciliation.
+
 ## Must Fix Next
 
-- [ ] P1: decide whether to delete legacy hedge helper paths after one more
-  reference audit. v3.2.2 prevents production fallback, but `bnc_place_hedge()`
-  and `exec_hedge_step()` still exist for isolated tests / Deribit execution
-  tests and should not be exposed as the current operator path.
+- [ ] P1: review remaining placeholder budget reserve:
+  `hedge_margin_reserve = 0.0` in precommit live data is still not an
+  acceptable long-term risk input.
+- [ ] P1: remove or rewrite stale current docs that still describe
+  authorization prompts as runtime behavior. Historical handoffs may remain,
+  but current continuation docs should state confirmation-code-only
+  interaction.
 
 ## Redundancy / Cleanup Candidates
 
@@ -101,12 +113,9 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   Runtime authorization commands are no longer part of the FMZ surface and the
   bundle excludes this module. Keep it only if tests still need it as a legacy
   pure-function reference; otherwise remove in a dedicated cleanup release.
-- [ ] Remove or rewrite stale docs that still describe authorization prompts as
-  runtime behavior. Historical handoffs may remain, but current continuation
-  docs should state confirmation-code-only interaction.
-- [ ] Review remaining placeholder budget reserve:
-  `hedge_margin_reserve = 0.0` in precommit live data is still not an
-  acceptable long-term risk input.
+- [ ] Fully delete the dry-run/test-only `bnc_place_hedge()` helper after any
+  remaining isolated tests are migrated to `bnc_submit_hedge_order()` or to
+  pure policy/controller tests.
 - [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
   dedicated release. v3.2.2 keeps the symbol but config validation rejects
   `True`, so it is no longer an operator-enabled half feature.

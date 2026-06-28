@@ -696,10 +696,17 @@ def exec_hedge_step(venue_cfg, side, amount, reduce_only, allow_live, label="hed
     if not side or not amount or amount <= 0:
         return {"filled": 0.0, "dry": (not allow_live), "venue": venue, "reason": "NO_OP"}
     if venue == "BINANCE":
-        return bnc_place_hedge(instrument, side, amount, reduce_only,
-                               allow_live=allow_live, idx=venue_cfg.get("exchange_index"),
-                               execution_style=execution_style,
-                               max_slippage_bps=max_slippage_bps)
+        if not allow_live:
+            return bnc_place_hedge(instrument, side, amount, reduce_only,
+                                   allow_live=False,
+                                   idx=venue_cfg.get("exchange_index"),
+                                   execution_style=execution_style,
+                                   max_slippage_bps=max_slippage_bps)
+        return {"filled": 0.0, "dry": False, "venue": "BINANCE",
+                "instrument": instrument, "side": side, "amount": amount,
+                "reduce_only": reduce_only, "post_only": False,
+                "execution_style": execution_style, "blocked": True,
+                "reason": "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT"}
     # DERIBIT 反向永续
     if not allow_live:
         return {"filled": 0.0, "dry": True, "venue": venue, "instrument": instrument,

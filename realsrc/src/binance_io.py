@@ -10,7 +10,7 @@
 import math
 
 from config import HEDGE_BINANCE_EXCHANGE_INDEX, HEDGE_BINANCE_PRICE_TICK
-from fmz_shim import exchanges, Log, Sleep
+from fmz_shim import exchanges, Log
 
 _BINANCE_PERP_CONTRACT_TYPE = "swap"
 
@@ -252,59 +252,23 @@ def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
 
 def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None,
                     execution_style="PROMPT_LIMIT", max_slippage_bps=5):
-    """下币安对冲腿。PROMPT_LIMIT 用盘口限价保护但不 post-only；reduce_only→平仓方向。
-    allow_live=False → 仅意图(dry)，不下单。"""
+    """Legacy Binance hedge helper kept for dry-run tests only.
+
+    V32 live hedge submission must use bnc_submit_hedge_order(), which leaves
+    order lifecycle handling to the pending-first reconciliation controller.
+    """
     if not side or not amount or amount <= 0:
-        return {"filled": 0.0, "dry": (not allow_live), "venue": "BINANCE", "reason": "NO_OP"}
+        return {"order_id": None, "filled": 0.0, "dry": (not allow_live),
+                "venue": "BINANCE", "reason": "NO_OP"}
     if not allow_live:
-        return {"filled": 0.0, "dry": True, "venue": "BINANCE", "symbol": symbol, "side": side,
-                "amount": amount, "reduce_only": reduce_only, "post_only": False,
-                "execution_style": execution_style,
-                "reason": "BINANCE_HEDGE_DRYRUN"}
-    ex = _ex(idx)
-    if ex is None:
-        return {"filled": 0.0, "dry": False, "venue": "BINANCE", "reason": "BINANCE_EXCHANGE_UNAVAILABLE"}
-    missing = _missing_methods(
-        ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell", "GetOrder", "CancelOrder"))
-    if missing:
-        return {"filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
-                "blocked": True, "missing_methods": missing}
-    try:
-        pair, contract_type = _select_binance_perp(ex, symbol)
-        t = ex.GetTicker() or {}
-        raw_price = _prompt_limit_price(t, side, max_slippage_bps)
-        if raw_price is None or raw_price <= 0:
-            return {"filled": 0.0, "dry": False, "venue": "BINANCE",
-                    "reduce_only": reduce_only, "post_only": False,
-                    "execution_style": execution_style, "reason": "NO_QUOTE"}
-        price = _round_prompt_price(raw_price, side, HEDGE_BINANCE_PRICE_TICK)
-        direction = ("closesell" if side == "buy" else "closebuy") if reduce_only else side
-        ex.SetDirection(direction)
-        resp = ex.Buy(price, amount) if side == "buy" else ex.Sell(price, amount)
-        oid = _order_id(resp)
-        Sleep(1000)
-        st = _get_order(ex, oid) or {}
-        filled = _filled_amount(st)
-        avg = _avg_price(st, price)
-        remaining = max(0.0, amount - filled)
-        cancelled = False
-        if remaining > 1e-12:
-            cancelled = _cancel_order(ex, oid)
-            st2 = _get_order(ex, oid) or st
-            filled2 = _filled_amount(st2)
-            if filled2 > filled:
-                filled = filled2
-                avg = _avg_price(st2, avg)
-            remaining = max(0.0, amount - filled)
-        return {"filled": filled, "avg_price": avg, "remaining": remaining,
-                "cancelled": cancelled, "dry": False, "venue": "BINANCE",
-                "symbol": symbol, "side": side, "amount": amount, "price": price,
-                "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
-                "order_id": oid, "order": resp, "reduce_only": reduce_only,
+        return {"order_id": None, "filled": 0.0, "dry": True,
+                "venue": "BINANCE", "symbol": symbol, "side": side,
+                "amount": amount, "reduce_only": reduce_only,
                 "post_only": False, "execution_style": execution_style,
-                "pair": pair, "contract_type": contract_type,
-                "reason": "BINANCE_HEDGE_STEP"}
-    except Exception as e:
-        Log("[binance] 下单异常:", str(e))
-        return {"filled": 0.0, "dry": False, "venue": "BINANCE", "reason": "BINANCE_ORDER_ERROR"}
+                "reason": "BINANCE_HEDGE_DRYRUN"}
+    return {"order_id": None, "filled": 0.0, "dry": False,
+            "venue": "BINANCE", "symbol": symbol, "side": side,
+            "amount": amount, "reduce_only": reduce_only,
+            "post_only": False, "execution_style": execution_style,
+            "blocked": True,
+            "reason": "LEGACY_HEDGE_HELPER_LIVE_DISABLED"}

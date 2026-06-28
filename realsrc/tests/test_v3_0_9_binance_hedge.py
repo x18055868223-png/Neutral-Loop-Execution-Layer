@@ -80,27 +80,28 @@ class _FakeBinance:
 def test_binance_prompt_limit_buy_confirms_cancels_and_rechecks():
     fake = _FakeBinance()
     fmz_shim.exchanges[1] = fake
-    B.Sleep = lambda _ms: None
-    r = B.bnc_place_hedge("BTCUSDC", "buy", 0.10, reduce_only=False, allow_live=True,
-                          execution_style="PROMPT_LIMIT", max_slippage_bps=5)
+    r = B.bnc_submit_hedge_order("BTCUSDC", "buy", 0.10, reduce_only=False,
+                                 allow_live=True, execution_style="PROMPT_LIMIT",
+                                 cross_bps=5)
     assert fake.io_calls == [("currency", "BTC_USDC")]
     assert fake.contract == "swap" and fake.direction == "buy"
     assert abs(fake.last_order[1] - 60030.0) < 1e-9
     assert r["post_only"] is False and r["execution_style"] == "PROMPT_LIMIT"
-    assert abs(r["filled"] - 0.05) < 1e-12 and abs(r["remaining"] - 0.05) < 1e-12
-    assert r["cancelled"] is True and fake.cancelled == ["b1"]
+    assert r["order_id"] == "b1" and r["reason"] == "BINANCE_HEDGE_SUBMITTED"
+    assert fake.cancelled == [] and fake.orders_seen == 0
     _restore()
 
 
 def test_binance_prompt_limit_sell_reduce_uses_closebuy_direction():
     fake = _FakeBinance()
     fmz_shim.exchanges[1] = fake
-    B.Sleep = lambda _ms: None
-    r = B.bnc_place_hedge("BTCUSDC", "sell", 0.10, reduce_only=True, allow_live=True,
-                          execution_style="PROMPT_LIMIT", max_slippage_bps=5)
+    r = B.bnc_submit_hedge_order("BTCUSDC", "sell", 0.10, reduce_only=True,
+                                 allow_live=True, execution_style="PROMPT_LIMIT",
+                                 cross_bps=5)
     assert fake.direction == "closebuy"
     assert abs(fake.last_order[1] - 59960.0) < 1e-9
     assert r["reduce_only"] is True and r["post_only"] is False
+    assert r["order_id"] == "s1" and r["reason"] == "BINANCE_HEDGE_SUBMITTED"
     _restore()
 
 
