@@ -14,7 +14,7 @@ SPOT = 60000.0
 
 
 def test_default_config_is_live_ready_without_legacy_operator_fields():
-    assert C.STRATEGY_VERSION == "3.0.13-manual-gate"
+    assert C.STRATEGY_VERSION == "3.1.4-manual-gate"
     assert C.RUN_PROFILE == "LIVE"
     assert C.DRY_RUN_PASSED is True
     assert C.ALLOW_ENTRY_TRADING is True
@@ -59,6 +59,17 @@ def _inst(now, h, strike):
         "instrument_name": "BTC-E%d-%d-C" % (h, strike),
         "strike": strike,
         "option_type": "call",
+        "expiration_timestamp": now + h * H,
+        "kind": "option",
+        "tick_size": 0.00001,
+    }
+
+
+def _put_inst(now, h, strike):
+    return {
+        "instrument_name": "BTC-E%d-%d-P" % (h, strike),
+        "strike": strike,
+        "option_type": "put",
         "expiration_timestamp": now + h * H,
         "kind": "option",
         "tick_size": 0.00001,
@@ -186,3 +197,92 @@ def test_menu_keeps_thin_low_relief_24h_candidates_and_limits_expiries():
     assert all(p["short_mark"] < 0.0005 for p in menu)
     assert all(p["qualified"] for p in menu)
     assert all(p.get("credit_on_margin_per_24h") for p in menu)
+
+
+def test_menu_keeps_20h_put_when_low_premium_protection_is_buyable():
+    import strategy as ST
+
+    now = 3000000
+    instruments = [
+        _put_inst(now, 20, 59500),
+        _put_inst(now, 20, 60000),
+        _put_inst(now, 20, 57500),
+        _put_inst(now, 20, 58000),
+        _put_inst(now, 20, 58500),
+        _put_inst(now, 45, 60000),
+        _put_inst(now, 45, 57500),
+    ]
+    quotes = {
+        "BTC-E20-59500-P": {"mark": 0.0010, "best_bid": 0.0008, "best_ask": 0.0010,
+                            "tick": 0.0001, "delta": -0.155, "gamma": 0.00031},
+        "BTC-E20-60000-P": {"mark": 0.0024, "best_bid": 0.0021, "best_ask": 0.0025,
+                            "tick": 0.0001, "delta": -0.33, "gamma": 0.00055},
+        "BTC-E20-57500-P": {"mark": 0.0002, "best_bid": 0.0001, "best_ask": 0.0003,
+                            "tick": 0.0001, "delta": -0.02, "gamma": 0.00002},
+        "BTC-E20-58000-P": {"mark": 0.0002, "best_bid": 0.0001, "best_ask": 0.0003,
+                            "tick": 0.0001, "delta": -0.03, "gamma": 0.00003},
+        "BTC-E20-58500-P": {"mark": 0.0003, "best_bid": 0.0002, "best_ask": 0.0004,
+                            "tick": 0.0001, "delta": -0.04, "gamma": 0.00004},
+        "BTC-E45-60000-P": {"mark": 0.0066, "best_bid": 0.0060, "best_ask": 0.0070,
+                            "tick": 0.0001, "delta": -0.41, "gamma": 0.00030},
+        "BTC-E45-57500-P": {"mark": 0.0007, "best_bid": 0.0006, "best_ask": 0.0009,
+                            "tick": 0.0001, "delta": -0.06, "gamma": 0.00006},
+    }
+
+    old = {
+        name: getattr(ST, name)
+        for name in (
+            "SETTLEMENT_CURRENCY",
+            "DIRECTION_BIAS",
+            "SHORT_DELTA_RANGE",
+            "PROTECTION_WIDTH_RANGE",
+            "ORDER_AMOUNT",
+            "MENU_SIZE",
+            "MIN_MARGIN_RELIEF_RATIO",
+            "UNDERLYING_REF_PRICE",
+            "dbt_get_instruments",
+            "_delta_lookup",
+            "_quote_cache",
+            "dbt_account_summary",
+            "spm_account_is_portfolio_margin",
+            "spm_simulate_structure",
+        )
+    }
+    try:
+        ST.SETTLEMENT_CURRENCY = "BTC"
+        ST.DIRECTION_BIAS = "SHORT_PUT"
+        ST.SHORT_DELTA_RANGE = (0.15, 0.45)
+        ST.PROTECTION_WIDTH_RANGE = (2000, 2500)
+        ST.ORDER_AMOUNT = 0.1
+        ST.MENU_SIZE = 10
+        ST.MIN_MARGIN_RELIEF_RATIO = 0.0
+        ST.UNDERLYING_REF_PRICE = None
+        ST.dbt_get_instruments = lambda *_args, **_kwargs: list(instruments)
+        ST._delta_lookup = lambda: (lambda inst: quotes[inst]["delta"])
+        ST._quote_cache = lambda: (lambda inst: quotes[inst])
+        ST.dbt_account_summary = lambda *_args, **_kwargs: {
+            "margin_model": "segregated_pm",
+            "portfolio_margining_enabled": True,
+        }
+        ST.spm_account_is_portfolio_margin = lambda *_args, **_kwargs: (
+            True,
+            "segregated_pm",
+        )
+        ST.spm_simulate_structure = lambda *_args, **_kwargs: {
+            "im_short_only": 0.0300,
+            "im_with_protection": 0.0294,
+            "relief_abs": 0.0006,
+            "relief_ratio": 0.02,
+        }
+
+        menu, _pm_ok, _model, reason, _diag = ST._build_menu(now, 60140.0)
+    finally:
+        for name, value in old.items():
+            setattr(ST, name, value)
+
+    assert reason == "OK"
+    near = [p for p in menu if round(p["short_dte_hours"]) == 20]
+    assert len(near) >= 2
+    assert {p["short_strike"] for p in near} >= {59500, 60000}
+    assert any(p["width"] == 1500 for p in near)
+    assert len([p for p in near if p["short_strike"] == 60000]) <= 2

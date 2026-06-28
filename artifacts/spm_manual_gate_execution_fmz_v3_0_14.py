@@ -1,77 +1,70 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.1.4-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.0.14-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
 # -*- coding: utf-8 -*-
-"""
-Human Audit Gate 执行层配置块（FMZ 启动前手填）。
+"""FMZ startup config for the manual-gate execution bundle.
 
-本版本只接受执行层本地人工审计配置：方向、数量、delta 范围、腿宽、
-风险退出预算和分动作授权门控均来自这些 UPPER_CASE 参数。信号层不参与
-执行主链路。交易员通常只需要看本文件顶部几个配置块。
+Trader edits should normally stay in the first two blocks: live identity/risk
+and the current manual directional view. Runtime safety gates remain explicit.
 """
 
-# ===== 当前版本 / 实例标识 =====
-ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.1.4-manual-gate"
-RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
+# ===== Instance / version =====
+ROBOT_ID = "spm-exec-1"
+STRATEGY_VERSION = "3.0.14-manual-gate"
+RUN_PROFILE = "LIVE"              # TEST=force dry-run gates off; LIVE=use ALLOW_* gates
 
-# ===== VRP_CONTEXT 数据源（只检查上下文有效性，不做旧价格门控）=====
+# ===== VRP_CONTEXT data source; validity-only, not a price gate =====
 GEX_CONTEXT_API_BASE = "http://13.231.16.198:8000"
 GEX_CONTEXT_API_KEY = "7WkM4LBAha7di0KMCtgty3NwdQcNXI5-j3o8MymkGiE"
 GEX_CONTEXT_TIMEOUT_SECONDS = 5
 
-# ===== 交易员核心输入（当前小额实盘测试面）=====
-SETTLEMENT_CURRENCY = "BTC"        # 结算币；当前主流程为 BTC
-MANUAL_PLANNING_ALLOWED = True     # True=允许按本地人工视图生成候选；False=只管持仓/退出/恢复
-DIRECTION_BIAS = "SHORT_PUT"      # SHORT_CALL=偏空卖 Call；SHORT_PUT=偏多卖 Put
-ORDER_AMOUNT = 0.1                 # 单结构数量（Deribit BTC 期权常用最小步长 0.1）
-SHORT_DELTA_RANGE = (0.15, 0.45)   # 短腿 |delta| 接受范围
-PROTECTION_WIDTH_RANGE = (2000, 2500)  # 保护腿腿宽范围(USD)，以短腿行权价为基准
-RISK_EXIT_MAX_SPEND = 0.001        # 风险退出最大支出(BTC)；风险触发时的独立成本上限
+# ===== Core trader inputs =====
+SETTLEMENT_CURRENCY = "BTC"
+MANUAL_PLANNING_ALLOWED = True
+DIRECTION_BIAS = "SHORT_PUT"      # SHORT_CALL | SHORT_PUT
+ORDER_AMOUNT = 0.1
+SHORT_DELTA_RANGE = (0.15, 0.45)
+PROTECTION_WIDTH_RANGE = (2000, 2500)
+RISK_EXIT_MAX_SPEND = 0.001
 
-# ===== 到期 / 排序默认值 =====
-TARGET_DTE_HOURS = 24              # 候选围绕 24h 到期；再取之后一个更晚到期作为备选
-ENDGAME_DTE_HOURS = 24             # 末日轮阈值：剩余 DTE 不高于此值时启用近到期保护腿宽容
-ENDGAME_PROTECTION_WIDTH_MIN = 1500  # 末日轮保护腿最小腿宽；普通轮仍使用 PROTECTION_WIDTH_RANGE
-ENDGAME_PROTECTION_CHOICES_PER_SHORT = 2  # 末日轮每个短腿最多保留的保护腿宽度候选数
-MENU_SIZE = 10                     # 状态栏最多展示候选条数
+# ===== Expiry and ranking defaults =====
+TARGET_DTE_HOURS = 24
+MENU_SIZE = 10
 PLAN_WEIGHTS = {"win_rate": 0.35, "rr": 0.25, "efficiency": 0.40, "manual": 0.0}
-UNDERLYING_REF_PRICE = None        # None=走实时 index；仅测试/演练时可固定参考价
+UNDERLYING_REF_PRICE = None
 
-# ===== 候选质量 / 执行安全门 =====
-MIN_MARGIN_RELIEF_RATIO = 0.0      # 软展示底线；组合预算仍是硬门
-THIN_SHORT_PREMIUM_WARN = 0.0005   # 短腿权利金过薄提示线；不再硬挡 24h 候选
-DEEP_OTM_MAX_DELTA = 0.05          # 保护腿过度虚值提示/筛选参考
-MAX_SPREAD_RATIO = 0.60            # 相对价差上限；真实执行前仍 fail-closed
-PROTECTION_LOW_PREMIUM_MAX = 0.0006     # 低价保护腿可用绝对价差门替代相对价差门
-PROTECTION_ABS_SPREAD_MAX = 0.00025     # 保护腿绝对 bid-ask 宽度上限
+# ===== Candidate quality / execution guards =====
+MIN_MARGIN_RELIEF_RATIO = 0.0      # soft display floor only; portfolio budget stays hard
+THIN_SHORT_PREMIUM_WARN = 0.0005
+DEEP_OTM_MAX_DELTA = 0.05
+MAX_SPREAD_RATIO = 0.60
+PROTECTION_LOW_PREMIUM_MAX = 0.0006
+PROTECTION_ABS_SPREAD_MAX = 0.00015
 
-# ===== 入场执行参数 =====
-MAX_CHASE_STEPS = 1                # 单次下单计划价最多追价步数
-CHASE_WAIT_SECONDS = 8             # 挂单后判定未成交的等待秒数
-ENTRY_MIN_NET_CREDIT = 0.0         # 入场净 credit 下限；0=至少非负
-ENTRY_MAX_TICK_STEPS = 3           # 开仓活动在信用底线内最多逐 tick 改价档数
-ENTRY_MAX_ATTEMPTS = 20            # 开仓活动软计数上限；无成交不清锁，保护腿改由时间上限触发 taker
-ENTRY_PROTECTION_TAKER_AFTER_SECONDS = 600 # 保护腿 maker 持续等待上限；超过后受控吃卖一
-ENTRY_SHORT_ORDER_WAIT_SECONDS = 60        # 卖方腿 maker 挂单存续；实盘观察后延长等待
+# ===== Entry execution =====
+MAX_CHASE_STEPS = 1
+CHASE_WAIT_SECONDS = 8
+ENTRY_MIN_NET_CREDIT = 0.0
+ENTRY_MAX_TICK_STEPS = 3
+ENTRY_MAX_ATTEMPTS = 20
 
-# ===== 分动作真实交易授权门控 =====
-ALLOW_ENTRY_TRADING = True         # 新开垂直价差（新增风险）
-ALLOW_EXIT_TRADING = True          # 买回短腿 / 卖出保护腿（降低期权风险）
-ALLOW_HEDGE_TRADING = True         # Binance BTCUSDC 永续 / Deribit BTC-PERPETUAL 对冲
-KILL_NEW_RISK = False              # 急停：停新风险；不阻断退出、对冲减仓、对账和孤儿清理
-EMERGENCY_REDUCE_ONLY = False      # 紧急只减：禁止任何开/加仓，对冲强制 reduce_only
-DRY_RUN_PASSED = True              # 实盘门开启前的人工确认项；False 时 live gates 必须关闭
+# ===== Runtime authorization gates =====
+ALLOW_ENTRY_TRADING = True
+ALLOW_EXIT_TRADING = True
+ALLOW_HEDGE_TRADING = True
+KILL_NEW_RISK = False
+EMERGENCY_REDUCE_ONLY = False
+DRY_RUN_PASSED = True
 
-# ===== 运行节奏 =====
-LOOP_INTERVAL_MS = 3000            # 主循环间隔；状态栏按此刷新
-PLAN_REFRESH_SECONDS = 45          # 方案库重算最小间隔：节流 API，并避免日志/状态过度刷新
-APPROVAL_TTL_MS = 30 * 60 * 1000   # 方案确认码有效期；超时清锁并要求重新确认
+# ===== Runtime cadence =====
+LOOP_INTERVAL_MS = 3000
+PLAN_REFRESH_SECONDS = 45
+APPROVAL_TTL_MS = 30 * 60 * 1000
 
-# ===== 组合投影预算限额（fail-closed）=====
+# ===== Portfolio projection limits =====
 PORTFOLIO_LIMITS = {
     "max_open_positions": 1,
     "max_short_gamma": 0.05,
@@ -80,47 +73,24 @@ PORTFOLIO_LIMITS = {
     "max_spread_loss_per_trade": 0.02,
 }
 
-# ===== 退出活动参数 =====
+# ===== Exit activity =====
 EXIT_QUOTE_REFRESH_MS = 3000
 EXIT_ORDER_REST_MS = 4000
 EXIT_REPRICE_COOLDOWN_MS = 6000
 EXIT_MAX_ACTIVE_ORDERS = 1
 EXIT_MAX_PRICE_STEPS_PER_LOOP = 1
-EXIT_RESERVE_RATIO = 0.15          # 退出预算中的费用/保守预留比例
-TAKE_PROFIT_MIN_DTE_HOURS = 3.0    # 普通 80% 捕获止盈要求剩余到期 > 该小时数；风险退出/对冲不受此限制
+EXIT_RESERVE_RATIO = 0.15
 
-# ===== 对冲（默认 Binance BTCUSDC 永续；Deribit BTC-PERPETUAL 仅兼容）=====
-HEDGE_REDUCTION_RATIO = 0.5        # 目标覆盖剩余短腿 delta 的比例；压尾部而非全 delta-neutral
-HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退(USD)
-HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
+# ===== Hedge defaults; Binance is the main flow, Deribit is compatibility =====
+HEDGE_REDUCTION_RATIO = 0.5
+HEDGE_CONTRACT_SIZE_FALLBACK = 10.0
+HEDGE_MIN_TRADE_FALLBACK = 10.0
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
 HEDGE_VENUE = "BINANCE"            # BINANCE | DERIBIT
-HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"   # 交易员配置仍写 BTCUSDC；FMZ 内部会切 BTC_USDC + swap
-HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性)
-HEDGE_BINANCE_PRICE_TICK = 0.1         # BTCUSDC 永续限价价格最小跳动；买入向上、卖出向下取整
-HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
-
-# ===== Binance hedge controller V313 policy (strategy v3.1.4 delivery) =====
-HEDGE_POLICY_V313_ENABLED = True
-HEDGE_STAGING_ENABLED = True
-HEDGE_HYSTERESIS_ENABLED = True
-HEDGE_COOLDOWN_ENABLED = True
-HEDGE_SLIPPAGE_GUARD_ENABLED = True
-HEDGE_SOFT_INITIAL_RATIO = 0.50
-HEDGE_SOFT_ADD_DRIFT_STEP = 0.05
-HEDGE_HARD_DRIFT = 0.35
-HEDGE_HARD_CROSS_BPS = 30
-HEDGE_SOFT_CROSS_BPS = 3
-HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA = 1.0
-HEDGE_SOFT_PERSIST_SECONDS = 20
-HEDGE_REDUCE_PERSIST_SECONDS = 20
-HEDGE_REDUCE_PROB_BUFFER = 0.05
-HEDGE_ADD_COOLDOWN_SECONDS = 30
-HEDGE_REDUCE_COOLDOWN_SECONDS = 60
-HEDGE_SLIP_ALERT_BPS = 8
-HEDGE_EPISODE_COST_ALERT_BPS = 20
-HEDGE_PENDING_STALE_SECONDS = 10
+HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"
+HEDGE_BINANCE_MIN_TRADE = 0.001
+HEDGE_BINANCE_EXCHANGE_INDEX = 1
 
 
 def normalize_run_profile(run_profile=None):
@@ -187,12 +157,6 @@ def validate_config():
         errs.append("DIRECTION_BIAS must be SHORT_CALL or SHORT_PUT")
     if not isinstance(TARGET_DTE_HOURS, (int, float)) or isinstance(TARGET_DTE_HOURS, bool) or TARGET_DTE_HOURS <= 0:
         errs.append("TARGET_DTE_HOURS must be > 0")
-    if not isinstance(ENDGAME_DTE_HOURS, (int, float)) or isinstance(ENDGAME_DTE_HOURS, bool) or ENDGAME_DTE_HOURS <= 0:
-        errs.append("ENDGAME_DTE_HOURS must be > 0")
-    if not isinstance(ENDGAME_PROTECTION_WIDTH_MIN, (int, float)) or isinstance(ENDGAME_PROTECTION_WIDTH_MIN, bool) or ENDGAME_PROTECTION_WIDTH_MIN <= 0:
-        errs.append("ENDGAME_PROTECTION_WIDTH_MIN must be > 0")
-    if not isinstance(ENDGAME_PROTECTION_CHOICES_PER_SHORT, int) or isinstance(ENDGAME_PROTECTION_CHOICES_PER_SHORT, bool) or ENDGAME_PROTECTION_CHOICES_PER_SHORT < 1:
-        errs.append("ENDGAME_PROTECTION_CHOICES_PER_SHORT must be >= 1")
     if ORDER_AMOUNT <= 0:
         errs.append("ORDER_AMOUNT must be positive")
     if not _valid_pair(SHORT_DELTA_RANGE, 0, 1):
@@ -261,8 +225,6 @@ def validate_config():
         errs.append("HEDGE_VENUE must be DERIBIT or BINANCE")
     if ENTRY_MAX_ATTEMPTS < 1 or ENTRY_MAX_TICK_STEPS < 0:
         errs.append("ENTRY_MAX_ATTEMPTS>=1 and ENTRY_MAX_TICK_STEPS>=0")
-    if ENTRY_PROTECTION_TAKER_AFTER_SECONDS < 1 or ENTRY_SHORT_ORDER_WAIT_SECONDS < 1:
-        errs.append("ENTRY_PROTECTION_TAKER_AFTER_SECONDS and ENTRY_SHORT_ORDER_WAIT_SECONDS must be >=1")
     return errs
 
 # ===================== module: manual_context =====================
@@ -472,23 +434,32 @@ def gate_summary(allow_entry, allow_exit, allow_hedge,
 
 # ===================== module: cmd_router =====================
 # -*- coding: utf-8 -*-
-"""确认码命令路由 + 命令账本 + 幂等（cmd_*）。
+"""交互命令路由 + 命令账本 + 幂等（cmd_*）。
 
 把 FMZ `GetCommand()` 返回的 "名:参数" 解析、归一、去重并落审计账本。
-唯一运行时交互入口是计划确认码：
-  - `执行:<确认码>` / `EXECUTE:<确认码>`
-  - 裸确认码（3-12 位字母数字）
+解决补充意见 P0-2：
+  - 幂等键 = robot_id + session_id + refresh_seq + command_type + nonce（**非**原始命令串哈希）；
+  - 「消费型」命令（执行/授权）一次性消费：同键已在历史账本则忽略
+    （防跨轮/重启重复下单、防延迟旧命令命中新方案）；
+  - 「切换型」命令（拒绝/撤销/急停/恢复）不去重（幂等动作可重复应用），但仍全部入账本审计。
 
 注：FMZ `GetCommand()` 在回测系统不生效，须真实机器人空跑验收。
+按钮名↔命令类型见 COMMAND_ALIASES（中文按钮名与英文类型双向）。
 """
 
 # 中文按钮名 / 英文类型 → 规范类型
 COMMAND_ALIASES = {
     "执行": "EXECUTE", "EXECUTE": "EXECUTE",
+    "拒绝": "REJECT", "REJECT": "REJECT",
+    "授权止盈": "EXIT_AUTHORIZE", "EXIT_AUTHORIZE": "EXIT_AUTHORIZE",
+    "撤销授权": "EXIT_REVOKE", "EXIT_REVOKE": "EXIT_REVOKE",
+    "风险退出授权": "RISK_EXIT_AUTHORIZE", "RISK_EXIT_AUTHORIZE": "RISK_EXIT_AUTHORIZE",
+    "急停": "KILL", "KILL": "KILL",
+    "恢复": "RESUME", "RESUME": "RESUME",
 }
 
-# 一次性消费型（触发方案锁定，不可重复）→ 严格幂等
-CONSUME_TYPES = frozenset({"EXECUTE"})
+# 一次性消费型（触发下单 / 授权等不可重复后果）→ 严格幂等
+CONSUME_TYPES = frozenset({"EXECUTE", "EXIT_AUTHORIZE", "RISK_EXIT_AUTHORIZE"})
 
 _CMD_LEDGER_KEY = "spm_cmd_ledger_v1"
 _CMD_LEDGER_MAX = 200
@@ -525,7 +496,7 @@ def idempotency_key(robot_id, session_id, refresh_seq, command_type, nonce):
 
 
 def _nonce_for(command):
-    # 消费型用 arg（确认码）作 nonce → 一次性消费、码变即新命令
+    # 消费型用 arg（确认码/授权码）作 nonce → 一次性消费、码变即新命令
     return command.get("arg") or command.get("type")
 
 
@@ -944,9 +915,6 @@ def build_vertical_entry_snapshot(locked, short_fill, long_fill, entry_fees,
         "side": locked.get("side"),
         "short_instrument": locked.get("short_instrument"),
         "long_instrument": locked.get("long_instrument"),
-        "short_strike": locked.get("short_strike"),
-        "long_strike": locked.get("long_strike"),
-        "breakeven": locked.get("breakeven"),
         "short_fill_amount": sa, "short_fill_price": sc,
         "long_fill_amount": la, "long_fill_price": lc,
         "entry_fees": entry_fees,
@@ -1092,8 +1060,7 @@ def entry_credit_capped_index(prot_buy_prices, short_sell_prices, amount, total_
 
 def entry_campaign_decision(has_locked, quotes_ok, credit_ok, attempts, max_attempts,
                             prot_done, short_done):
-    """开仓活动下一状态 / 是否可下单（纯）。
-    max_attempts 只保留为软计数提示，不代表清锁/放弃；保护腿兜底由订单等待时间触发。"""
+    """开仓活动下一状态 / 是否可下单（纯）。信用底线不满足 → 暂停等市场或（额度耗尽）放弃。"""
     if not has_locked:
         return {"state": ENTRY_IDLE, "can_order": False, "reason": "NO_LOCKED_PLAN"}
     if prot_done and short_done:
@@ -1101,9 +1068,11 @@ def entry_campaign_decision(has_locked, quotes_ok, credit_ok, attempts, max_atte
     if not quotes_ok:
         return {"state": ENTRY_PAUSED_DATA, "can_order": False, "reason": "NO_RELIABLE_QUOTE"}
     if not credit_ok:
+        if attempts >= max_attempts:
+            return {"state": ENTRY_ABANDONED, "can_order": False, "reason": "CREDIT_FLOOR_UNREACHABLE"}
         return {"state": ENTRY_PAUSED_CREDIT, "can_order": False, "reason": "BELOW_CREDIT_FLOOR_WAIT"}
     if attempts >= max_attempts:
-        return {"state": ENTRY_WORKING, "can_order": True, "reason": "SOFT_ATTEMPT_LIMIT_KEEP_LOCKED"}
+        return {"state": ENTRY_ABANDONED, "can_order": False, "reason": "MAX_ATTEMPTS_EXCEEDED"}
     return {"state": ENTRY_WORKING, "can_order": True, "reason": "POST_WITHIN_CREDIT_FLOOR"}
 
 
@@ -1137,6 +1106,98 @@ def position_reconcile(snap, option_positions):
         if inst not in expected:
             reasons.append("UNEXPECTED:%s=%s" % (inst, sz))
     return {"reconciled": not reasons, "reasons": reasons}
+
+# ===================== module: authorization =====================
+# -*- coding: utf-8 -*-
+"""软授权（持仓退出 / 风险退出）合同 + 短授权码（auth_*）。纯函数，便于单测。
+
+设计稿 §6 + 补充意见 P1：软授权与 `position_id` 绑定，是与主循环**并行的非阻塞授权标志**，
+不阻塞主循环；默认持续到 用户撤销 / 持仓结束 / 账本身份变化。
+风险退出授权独立于普通止盈授权，并补全完整语义：
+  max_exit_spend / allowed_order_types / valid_until / revoke / consume。
+"""
+import base64
+import hashlib
+
+ST_UNAUTHORIZED = "UNAUTHORIZED"
+ST_AUTHORIZED = "AUTHORIZED"
+ST_REVOKED = "REVOKED"
+ST_CONSUMED = "CONSUMED"
+
+POLICY_TAKE_PROFIT = "BOUNDED_EXIT_V1"
+POLICY_RISK_EXIT = "RISK_EXIT_V1"
+
+
+def _h(*parts):
+    s = "|".join("" if p is None else str(p) for p in parts)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def auth_code(position_id, policy_code, length=4):
+    """持仓授权短码：标识 (position_id, policy)。Base32 前 length 位。"""
+    raw = base64.b32encode(bytes.fromhex(_h(position_id, policy_code))).decode("ascii").rstrip("=")
+    return raw[:length]
+
+
+def build_authorization(position_id, policy_code, now_ts, operator_note="",
+                        max_exit_spend=None, allowed_order_types=None, valid_until=None):
+    """构建一份持仓退出授权（初始 AUTHORIZED）。risk-exit 传 max_exit_spend 等完整语义。"""
+    return {
+        "schema_name": "PositionExitAuthorization",
+        "position_id": position_id,
+        "policy_code": policy_code,
+        "authorization_state": ST_AUTHORIZED,
+        "authorized_ts": now_ts,
+        "revoked_ts": None,
+        "consumed_ts": None,
+        "authorization_hash": _h(position_id, policy_code, now_ts)[:16],
+        "auth_code": auth_code(position_id, policy_code),
+        "operator_note": operator_note,
+        # P1：风险退出授权完整语义（普通止盈授权这些为默认 / None）
+        "max_exit_spend": max_exit_spend,
+        "allowed_order_types": list(allowed_order_types or ["post_only"]),
+        "valid_until": valid_until,
+    }
+
+
+def is_authorized(auth, position_id, now_ts=None):
+    """授权对当前 position_id 是否有效（AUTHORIZED + 绑定一致 + 未过期）。非阻塞只读。"""
+    if not auth or auth.get("authorization_state") != ST_AUTHORIZED:
+        return False
+    if auth.get("position_id") != position_id:
+        return False                      # 持仓身份变化 → 授权失效
+    vu = auth.get("valid_until")
+    if vu is not None and now_ts is not None and now_ts >= vu:
+        return False
+    return True
+
+
+def revoke(auth, now_ts):
+    if not auth:
+        return auth
+    a = dict(auth)
+    a["authorization_state"] = ST_REVOKED
+    a["revoked_ts"] = now_ts
+    return a
+
+
+def consume(auth, now_ts):
+    """退出活动完成后标记 CONSUMED（一次性消费）。"""
+    if not auth:
+        return auth
+    a = dict(auth)
+    a["authorization_state"] = ST_CONSUMED
+    a["consumed_ts"] = now_ts
+    return a
+
+
+def authorize_from_code(code, position_id, policy_code, now_ts, **kw):
+    """校验用户输入的授权码是否匹配当前 position+policy；匹配 → 构建授权，否则 None。"""
+    if not code or not position_id:
+        return None
+    if str(code).strip().upper() != auth_code(position_id, policy_code).upper():
+        return None
+    return build_authorization(position_id, policy_code, now_ts, **kw)
 
 # ===================== module: deribit_io =====================
 # -*- coding: utf-8 -*-
@@ -1311,8 +1372,6 @@ def dbt_cancel(order_id):
 注：真实下单调用形态依 FMZ 币安期货接口（SetContractType/SetDirection/Buy/Sell），**须真实机器人确认**；
 默认 `ALLOW_HEDGE_TRADING=False`；跨所对账/恢复需人工核对。
 """
-import math
-
 
 _BINANCE_PERP_CONTRACT_TYPE = "swap"
 
@@ -1348,51 +1407,22 @@ def _select_binance_perp(ex, symbol):
     return pair, _BINANCE_PERP_CONTRACT_TYPE
 
 
-def _num(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-
-
-def _position_unrealized_pnl(position):
-    if not isinstance(position, dict):
-        return None
-    for key in ("Profit", "UnrealizedProfit", "unRealizedProfit",
-                "unrealizedProfit", "unrealizedPnl", "unrealized_pnl_usd"):
-        v = _num(position.get(key))
-        if v is not None:
-            return float(v)
-    return None
-
-
-def bnc_get_position_snapshot(symbol, idx=None):
-    """读 BTCUSDC 永续快照；读失败 → None。qty 正=多 / 负=空。"""
+def bnc_get_position_btc(symbol, idx=None):
+    """读 BTCUSDC 永续净持仓(BTC；正=多 / 负=空)。读失败 → None。"""
     ex = _ex(idx)
     if ex is None:
         return None
     try:
-        pair, contract_type = _select_binance_perp(ex, symbol)
+        _select_binance_perp(ex, symbol)
         net = 0.0
-        pnl = 0.0
-        pnl_seen = False
-        positions = list(ex.GetPosition() or [])
-        for p in positions:
+        for p in (ex.GetPosition() or []):
             amt = p.get("Amount") or 0.0
             long_side = p.get("Type") in (0, "buy", "long", "Long")
             net += amt if long_side else -amt
-            pp = _position_unrealized_pnl(p)
-            if pp is not None:
-                pnl += pp
-                pnl_seen = True
-        return {"qty": net, "unrealized_pnl_usd": pnl if pnl_seen else None,
-                "positions": positions, "pair": pair, "contract_type": contract_type}
+        return net
     except Exception as e:
         Log("[binance] GetPosition 异常:", str(e))
         return None
-
-
-def bnc_get_position_btc(symbol, idx=None):
-    """读 BTCUSDC 永续净持仓(BTC；正=多 / 负=空)。读失败 → None。"""
-    snap = bnc_get_position_snapshot(symbol, idx)
-    return None if snap is None else snap.get("qty")
 
 
 def _order_id(resp):
@@ -1430,22 +1460,6 @@ def _prompt_limit_price(ticker, side, max_slippage_bps):
     return None if not bid or bid <= 0 else bid * (1.0 - bps)
 
 
-def _tick_decimals(tick):
-    s = ("%.12f" % tick).rstrip("0").rstrip(".")
-    return len(s.split(".", 1)[1]) if "." in s else 0
-
-
-def _round_prompt_price(price, side, tick=None):
-    tick = HEDGE_BINANCE_PRICE_TICK if tick is None else tick
-    if not tick or tick <= 0:
-        return price
-    if side == "buy":
-        rounded = math.ceil((price / tick) - 1e-12) * tick
-    else:
-        rounded = math.floor((price / tick) + 1e-12) * tick
-    return round(rounded, _tick_decimals(tick))
-
-
 def _get_order(ex, oid):
     fn = getattr(ex, "GetOrder", None)
     if not fn or oid is None:
@@ -1460,82 +1474,8 @@ def _cancel_order(ex, oid):
     return bool(fn(oid))
 
 
-def bnc_get_hedge_order(symbol, order_id, idx=None):
-    ex = _ex(idx)
-    if ex is None or order_id is None:
-        return None
-    try:
-        if callable(getattr(ex, "SetContractType", None)):
-            _select_binance_perp(ex, symbol)
-        return _get_order(ex, order_id)
-    except Exception as e:
-        Log("[binance] GetOrder 异常:", str(e))
-        return None
-
-
-def bnc_cancel_hedge_order(symbol, order_id, idx=None):
-    ex = _ex(idx)
-    if ex is None or order_id is None:
-        return False
-    try:
-        if callable(getattr(ex, "SetContractType", None)):
-            _select_binance_perp(ex, symbol)
-        return _cancel_order(ex, order_id)
-    except Exception as e:
-        Log("[binance] CancelOrder 异常:", str(e))
-        return False
-
-
 def _missing_methods(ex, names):
     return [name for name in names if not callable(getattr(ex, name, None))]
-
-
-def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
-                           allow_live=True, idx=None,
-                           execution_style="PROMPT_LIMIT"):
-    """Submit one Binance hedge order and leave lifecycle resolution to caller."""
-    if not side or not amount or amount <= 0:
-        return {"order_id": None, "filled": 0.0, "dry": (not allow_live),
-                "venue": "BINANCE", "reason": "NO_OP"}
-    if not allow_live:
-        return {"order_id": None, "filled": 0.0, "dry": True, "venue": "BINANCE",
-                "symbol": symbol, "side": side, "amount": amount,
-                "reduce_only": reduce_only, "post_only": False,
-                "execution_style": execution_style,
-                "cross_bps": cross_bps, "reason": "BINANCE_HEDGE_DRYRUN"}
-    ex = _ex(idx)
-    if ex is None:
-        return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_EXCHANGE_UNAVAILABLE"}
-    missing = _missing_methods(ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell"))
-    if missing:
-        return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_ORDER_SUBMIT_UNSUPPORTED",
-                "blocked": True, "missing_methods": missing}
-    try:
-        pair, contract_type = _select_binance_perp(ex, symbol)
-        t = ex.GetTicker() or {}
-        raw_price = _prompt_limit_price(t, side, cross_bps)
-        if raw_price is None or raw_price <= 0:
-            return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                    "reduce_only": reduce_only, "post_only": False,
-                    "execution_style": execution_style, "reason": "NO_QUOTE"}
-        price = _round_prompt_price(raw_price, side, HEDGE_BINANCE_PRICE_TICK)
-        direction = ("closesell" if side == "buy" else "closebuy") if reduce_only else side
-        ex.SetDirection(direction)
-        resp = ex.Buy(price, amount) if side == "buy" else ex.Sell(price, amount)
-        oid = _order_id(resp)
-        return {"order_id": oid, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "symbol": symbol, "side": side, "amount": amount, "price": price,
-                "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
-                "order": resp, "reduce_only": reduce_only, "post_only": False,
-                "execution_style": execution_style, "cross_bps": cross_bps,
-                "pair": pair, "contract_type": contract_type,
-                "reason": "BINANCE_HEDGE_SUBMITTED"}
-    except Exception as e:
-        Log("[binance] 下单异常:", str(e))
-        return {"order_id": None, "filled": 0.0, "dry": False, "venue": "BINANCE",
-                "reason": "BINANCE_ORDER_ERROR"}
 
 
 def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None,
@@ -1561,12 +1501,11 @@ def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None
     try:
         pair, contract_type = _select_binance_perp(ex, symbol)
         t = ex.GetTicker() or {}
-        raw_price = _prompt_limit_price(t, side, max_slippage_bps)
-        if raw_price is None or raw_price <= 0:
+        price = _prompt_limit_price(t, side, max_slippage_bps)
+        if price is None or price <= 0:
             return {"filled": 0.0, "dry": False, "venue": "BINANCE",
                     "reduce_only": reduce_only, "post_only": False,
                     "execution_style": execution_style, "reason": "NO_QUOTE"}
-        price = _round_prompt_price(raw_price, side, HEDGE_BINANCE_PRICE_TICK)
         direction = ("closesell" if side == "buy" else "closebuy") if reduce_only else side
         ex.SetDirection(direction)
         resp = ex.Buy(price, amount) if side == "buy" else ex.Sell(price, amount)
@@ -1588,7 +1527,6 @@ def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None
         return {"filled": filled, "avg_price": avg, "remaining": remaining,
                 "cancelled": cancelled, "dry": False, "venue": "BINANCE",
                 "symbol": symbol, "side": side, "amount": amount, "price": price,
-                "raw_price": raw_price, "price_tick": HEDGE_BINANCE_PRICE_TICK,
                 "order_id": oid, "order": resp, "reduce_only": reduce_only,
                 "post_only": False, "execution_style": execution_style,
                 "pair": pair, "contract_type": contract_type,
@@ -2180,7 +2118,7 @@ REASON_CN = {
     "DRY_RUN_PLAN_ONLY": "空跑：仅生成方案，未真实下单",
     "STRUCTURE_OPEN": "结构已建立（保护腿 + 卖方腿成交）",
     "PROTECTION_ACTIVE_NO_SHORT": "保护腿已建，卖方腿未成交（等待/人工）",
-    "PROTECTION_NOT_FILLED": "保护腿未成交，继续围绕锁定方案等待",
+    "PROTECTION_NOT_FILLED": "保护腿未成交，已放弃本次",
     "MARGIN_RELIEF_INSUFFICIENT": "保证金释放不足，未达门槛，已放弃",
     "ACCOUNT_NOT_PM": "账户非组合保证金(S:PM)，已放弃",
     "NO_SPOT": "无法获取参考价",
@@ -2353,14 +2291,12 @@ def _overview_table(ctx):
         profile_line += " / missing " + ",".join(missing)
     else:
         profile_line += " / live checklist ready"
-    self_check = disp_self_check_line(g("startup_self_check"))
     return {
         "type": "table", "title": "运行概览",
         "cols": ["项目", "值"],
         "rows": [
             ["版本 / 主链", "v%s ｜ 完整主链" % (g("version") or "?")],
             ["RUN_PROFILE", profile_line],
-            ["启动自检", self_check],
             ["标的 / 结算币", g("currency")],
             ["目标DTE / 审批TTL", "%sh / %s分" % (g("target_dte_hours"), int((g("approval_ttl_ms") or 0) / 60000))],
             ["人工审计门", disp_manual_gate_state_cn(g("manual_gate_state"))],
@@ -2388,30 +2324,6 @@ def disp_diag_line(diag):
         diag.get("生成候选", 0), diag.get("进入菜单", 0), diag.get("合格", 0)))
 
 
-def disp_self_check_line(self_check):
-    if not self_check:
-        return "未运行"
-    overall = self_check.get("overall") or "UNKNOWN"
-    checks = self_check.get("checks") or {}
-    labels = {
-        "config": "配置",
-        "deribit_index": "Deribit行情",
-        "deribit_options": "Deribit期权",
-        "deribit_account": "Deribit账户",
-        "gex_context": "GEX",
-        "binance_hedge_position": "Binance对冲",
-    }
-    failed = []
-    for key in ("config", "deribit_index", "deribit_options", "deribit_account",
-                "gex_context", "binance_hedge_position"):
-        item = checks.get(key)
-        if item and not item.get("ok"):
-            failed.append("%s:%s" % (labels.get(key, key), item.get("reason") or "FAIL"))
-    if failed:
-        return "%s ｜ %s" % (overall, "；".join(failed))
-    return "%s ｜ 交易所/数据/模块自检通过" % overall
-
-
 def disp_menu_table(menu, selected_no, spot):
     """方案库对比（同期垂直信用价差；★=当前选中的方案号）。"""
     def pct(x):
@@ -2420,37 +2332,19 @@ def disp_menu_table(menu, selected_no, spot):
     def f2(x):
         return ("%.2f" % x) if isinstance(x, (int, float)) else "—"
 
-    def expiry_key(p):
-        return p.get("short_expiry") or p.get("short_expiry_label") or p.get("short_dte_hours")
-
-    def expiry_sort_key(k):
-        return (0, k) if isinstance(k, (int, float)) else (1, str(k))
-
-    has_target = any((p or {}).get("expiry_role") == "TARGET_24H" for p in (menu or []))
-    keys = [expiry_key(p or {}) for p in (menu or []) if expiry_key(p or {}) is not None]
-    nearest_display_key = min(keys, key=expiry_sort_key) if keys else None
-
-    def role_cn(p):
-        role = p.get("expiry_role")
-        if not has_target and nearest_display_key is not None and expiry_key(p) == nearest_display_key:
-            return "最近可用"
-        return {"TARGET_24H": "近24h", "NEXT_EXPIRY": "次日备选"}.get(role, "—")
-
     rows = []
     for p in menu:
         g = p.get
         star = "★" if g("id") == selected_no else ""
         qihao = "%s(同)" % g("short_expiry_label")
-        code = g("_confirm_code") or g("confirm_code") or "—"
-        if code == "—" and g("_not_lockable_reason"):
-            code = "不可锁定:" + str(g("_not_lockable_reason"))
+        role = {"TARGET_24H": "近24h", "NEXT_EXPIRY": "次日备选"}.get(g("expiry_role"), "—")
         tags = "/".join(g("tags") or []) or "—"
         ok = "合格" if g("qualified") else ("✗" + (g("reject_reason") or ""))
         if g("qualified") and g("execution_feasibility_grade"):
             ok = "%s/%s" % (ok, g("execution_feasibility_grade"))
         dte = ("%.1fd" % (g("short_dte_hours") / 24.0)) if g("short_dte_hours") else "—"
         rows.append([
-            "%s%s" % (star, g("id")), code, tags, role_cn(p), g("mode_cn") or "—", qihao, dte,
+            "%s%s" % (star, g("id")), tags, role, g("mode_cn") or "—", qihao, dte,
             "%s(Δ%s)" % (_num(g("short_strike")), _num(g("short_delta"))),
             _num(g("protection_strike")), _num(g("width")),
             _dist_pct(g("short_strike"), spot), pct(g("win_rate")),
@@ -2461,8 +2355,8 @@ def disp_menu_table(menu, selected_no, spot):
         ])
     return {
         "type": "table",
-        "title": "固定备选方案库（完整展示；不随实时行情重排；VRP_CONTEXT_MISSING=仅展示不可锁定；有效$=净 credit）",
-        "cols": ["编号", "确认码/锁定状态", "推荐", "期号角色", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
+        "title": "策略选择明细（★=当前选中；有效$=净 credit；24h效率=按资金占用时间折算）",
+        "cols": ["编号", "推荐", "期号角色", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
                  "腿宽", "短距现价", "胜率", "有效$", "信用/保证金", "24h效率", "盈亏比", "盈亏平衡价",
                  "释放", "合格"],
         "rows": rows,
@@ -2511,10 +2405,9 @@ def _position_table(ctx):
             ("%.0f" % g("execution_feasibility_score"))
             if isinstance(g("execution_feasibility_score"), (int, float)) else "—"),
             ",".join(g("execution_feasibility_warnings") or []) or "—"])
-    title_prefix = "候选方案预览" if g("preview_plan_detail") else "选用方案"
     return {
-        "type": "table", "title": "%s · 保证金与成本（编号 %s · 评级 %s · 预估）"
-        % (title_prefix, g("selected_id"), disp_health_grade(ctx)),
+        "type": "table", "title": "选用方案 · 保证金与成本（编号 %s · 评级 %s · 预估）"
+        % (g("selected_id"), disp_health_grade(ctx)),
         "cols": ["项目", "值/BTC", "≈USD/备注"], "rows": rows,
     }
 
@@ -2537,264 +2430,6 @@ def _health_table(ctx):
             "cols": ["级别", "说明"], "rows": rows}
 
 
-def _pct1(x):
-    return ("%.1f%%" % (x * 100)) if isinstance(x, (int, float)) else "数据缺口"
-
-
-def _pct_signed(x):
-    return ("%+.1f%%" % (x * 100)) if isinstance(x, (int, float)) else "数据缺口"
-
-
-def _market_line(mark, bid, ask):
-    if mark is None and bid is None and ask is None:
-        return "数据缺口"
-    return "mark %s ｜ bid %s ｜ ask %s" % (_num(mark), _num(bid), _num(ask))
-
-
-def _qty_line(v):
-    return _num(v) if isinstance(v, (int, float)) else "数据缺口"
-
-
-def _btc_usd_gap(btc_val, spot):
-    if not isinstance(btc_val, (int, float)):
-        return "数据缺口"
-    return _btc_usd(btc_val, spot)
-
-
-def _usd_signed_value(v):
-    if not isinstance(v, (int, float)) or isinstance(v, bool):
-        return "数据缺口"
-    return "$%.2f" % v if v >= 0 else "-$%.2f" % abs(v)
-
-
-def _num_or_gap(v, small=6, big=2):
-    return _num(v, small=small, big=big) if isinstance(v, (int, float)) and not isinstance(v, bool) else "数据缺口"
-
-
-def _is_position_manage(ctx):
-    return ctx.get("console_phase") == "POSITION_MANAGE" or any(
-        ctx.get(k) for k in ("position_detail", "take_profit_detail", "hedge_detail", "ledger_detail")
-    )
-
-
-def _take_profit_summary_cn(ctx):
-    tp = ctx.get("take_profit_detail") or {}
-    if not tp:
-        ratio = ctx.get("take_profit_ratio")
-        return "TP=%s" % (ratio if ratio is not None else "数据缺口")
-    status = tp.get("status") or ("已达标" if tp.get("qualified") else ("未达标" if tp.get("ratio") is not None else "数据缺口"))
-    if not tp.get("quote_ok", True) and tp.get("quote_gap"):
-        status += "｜" + str(tp.get("quote_gap"))
-    if tp.get("dte_gate_active"):
-        status += "｜普通止盈暂停:%s" % (tp.get("dte_gate_reason") or "TP_DTE_GATE")
-    return "%s｜捕获 %s / 目标 %s｜目标价 %s" % (
-        status, _pct1(tp.get("ratio")), _pct1(tp.get("target_ratio")), _num(tp.get("price_cap")))
-
-
-def _hedge_summary_cn(ctx):
-    h = ctx.get("hedge_detail") or {}
-    if h:
-        if h.get("data_gap"):
-            return "数据缺口：%s｜禁新增对冲/仅保守持仓" % h.get("data_gap")
-        reduce_only = "reduce_only=%s" % ("是" if h.get("reduce_only") else "否")
-        if h.get("hedge_policy"):
-            return "%s｜%s｜full %s eff %s 当前 %s delta %s｜pending %s" % (
-                h.get("policy_state") or "HOLD",
-                h.get("policy_reason") or "—",
-                _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
-                _num(h.get("current_hedge_qty")), _num(h.get("policy_delta_to_trade")),
-                h.get("pending_order_id") or "—")
-        return "%s｜%s/%s｜目标 %s 当前 %s 预计 %s｜%s" % (
-            h.get("action_cn") or h.get("action") or "保持",
-            h.get("venue") or "—", h.get("instrument") or "—",
-            _num(h.get("target")), _num(h.get("perp_qty")), _num(h.get("delta_to_trade")),
-            reduce_only)
-    return ctx.get("hedge_state") or ("风险状态 %s" % (ctx.get("risk_state") or "—"))
-
-
-def _ledger_summary_cn(ctx):
-    ld = ctx.get("ledger_detail") or {}
-    if not ld:
-        rec = ctx.get("reconciled")
-        return "状态 %s｜恢复 %s｜对账 %s" % (
-            disp_state_cn(ctx.get("state")), ctx.get("recovery_state") or "OK",
-            "已对齐" if rec is True else ("不一致" if rec is False else "—"))
-    rec = ld.get("reconciled")
-    rec_line = "已对齐" if rec is True else ("不一致" if rec is False else "数据缺口")
-    recovery = ld.get("recovery_state") or "OK"
-    allow = "可新开" if ld.get("allow_new_open", True) else "禁新开"
-    return "%s｜恢复 %s/%s｜净credit %s｜剩余退出预算 %s" % (
-        rec_line, recovery, allow,
-        _btc_usd_gap(ld.get("actual_net_credit"), ctx.get("spot")),
-        _btc_usd_gap(ld.get("remaining_exit_budget"), ctx.get("spot")))
-
-
-def _position_manage_overview_table(ctx):
-    pd = ctx.get("position_detail") or {}
-    hedge_pnl = pd.get("hedge_unrealized_pnl_usd")
-    hedge_state = pd.get("hedge_pnl_state")
-    hedge_line = _usd_signed_value(hedge_pnl) if isinstance(hedge_pnl, (int, float)) else (hedge_state or "数据缺口")
-    pnl_gap = pd.get("pnl_data_gap") or "未扣除已发生手续费/已用退出支出"
-    return {"type": "table", "title": "持仓总览", "cols": ["项目", "值", "备注"], "rows": [
-        ["生命周期", pd.get("lifecycle") or disp_state_cn(ctx.get("state")), ctx.get("exit_campaign_state") or "—"],
-        ["短腿合约", pd.get("short_instrument") or "数据缺口", "剩余 %s" % _qty_line(pd.get("remaining_short_qty"))],
-        ["保护腿合约", pd.get("long_instrument") or "数据缺口", "剩余 %s" % _qty_line(pd.get("long_remaining_qty"))],
-        ["入场均价(短/保护)", "%s / %s" % (_num(pd.get("short_fill_price")), _num(pd.get("long_fill_price"))), "冻结成交均价"],
-        ["短腿盘口", _market_line(pd.get("short_mark"), pd.get("short_bid"), pd.get("short_ask")), "持仓风险主参考"],
-        ["保护腿盘口", _market_line(pd.get("long_mark"), pd.get("long_bid"), pd.get("long_ask")), "保护价值参考"],
-        ["盘口数据", pd.get("quote_gap") or "OK", "仅影响展示，不改变持仓管理动作"],
-        ["到期剩余", ("%.1fh" % pd.get("dte_hours")) if isinstance(pd.get("dte_hours"), (int, float)) else "数据缺口", "短腿 DTE"],
-        ["盈亏平衡价", _num_or_gap(pd.get("breakeven"), small=2, big=2), "旧持仓缺失集中归入恢复接管缺口"],
-        ["短腿距现价", ("%.1f%%" % pd.get("short_distance_pct")) if isinstance(pd.get("short_distance_pct"), (int, float)) else "数据缺口", "按当前 spot"],
-        ["期权浮动盈亏", "短腿 %s ｜ 保护腿 %s ｜ 合计 %s" % (
-            _usd_signed_value(pd.get("option_short_unrealized_pnl_usd")),
-            _usd_signed_value(pd.get("option_long_unrealized_pnl_usd")),
-            _usd_signed_value(pd.get("option_unrealized_pnl_usd"))), "按 mark 估算，折 USD"],
-        ["期货对冲浮动盈亏", hedge_line, "无对冲时显示“对冲未启用”，不渲染成 0"],
-        ["组合浮动盈亏", _usd_signed_value(pd.get("combo_unrealized_pnl_usd")), pnl_gap],
-    ]}
-
-
-def _take_profit_budget_table(ctx):
-    tp = ctx.get("take_profit_detail") or {}
-    risk = ctx.get("risk_exit_detail") or {}
-    status = tp.get("status") or ("已达标" if tp.get("qualified") else ("未达标" if tp.get("ratio") is not None else "数据缺口"))
-    if not tp.get("quote_ok", True) and tp.get("quote_gap"):
-        status += "｜" + str(tp.get("quote_gap"))
-    dte_gate_note = "剩余DTE %s；普通止盈门槛 > %sh；风险退出/对冲不受限" % (
-        ("%.1fh" % tp.get("remaining_dte_hours")) if isinstance(tp.get("remaining_dte_hours"), (int, float)) else "数据缺口",
-        tp.get("take_profit_min_dte_hours") if tp.get("take_profit_min_dte_hours") is not None else "—")
-    if tp.get("dte_gate_active"):
-        status += "｜普通止盈暂停"
-    if risk.get("within"):
-        risk_within = "可越价执行"
-    elif risk.get("reason"):
-        risk_within = "不可执行:%s" % risk.get("reason")
-    else:
-        risk_within = "不可越价/预算不足"
-    risk_book_line = "卖一 %s ｜ 深度 %s ｜ 价格%s ｜ 深度%s" % (
-        _num_or_gap(risk.get("ask")),
-        _num_or_gap(risk.get("ask_depth")),
-        "通过" if risk.get("within_price") else "受限",
-        "通过" if risk.get("depth_ok") else "受限")
-    target_underlying = tp.get("tp_underlying_target_price")
-    if isinstance(target_underlying, (int, float)) and not isinstance(target_underlying, bool):
-        target_underlying_line = "%s（delta线性估算）" % _num(target_underlying, small=2, big=2)
-    else:
-        target_underlying_line = "数据缺口:%s" % (tp.get("tp_target_data_gap") or "TP_UNDERLYING_TARGET_DATA_GAP")
-    return {"type": "table", "title": "止盈/退出预算", "cols": ["项目", "值", "备注"], "rows": [
-        ["止盈状态", "%s ｜ 当前捕获 %s / 目标 %s" % (status, _pct1(tp.get("ratio")), _pct1(tp.get("target_ratio"))), "保护腿价值不进分母"],
-        ["临近交割止盈门", ("触发｜%s" % dte_gate_note) if tp.get("dte_gate_active") else ("未触发｜%s" % dte_gate_note), tp.get("dte_gate_reason") or "仅限制普通止盈"],
-        ["本期最大盈利上限", _btc_usd_gap(tp.get("entry_profit_ceiling_net"), ctx.get("spot")), "冻结入场快照"],
-        ["目标止盈金额", _btc_usd_gap(tp.get("target_profit_amount"), ctx.get("spot")), "默认 80% 捕获"],
-        ["短腿参考买回成本", _btc_usd_gap(tp.get("short_buyback_ref"), ctx.get("spot")), "mark × 剩余短腿数量"],
-        ["预估退出费/预留", "%s / %s" % (_btc_usd(tp.get("estimated_exit_fee"), ctx.get("spot")),
-                                    _btc_usd(tp.get("exit_reserve"), ctx.get("spot"))), "预算保守项"],
-        ["剩余买回预算", _btc_usd_gap(tp.get("remaining_budget"), ctx.get("spot")), "max_total_exit_spend - 已用 - 预留"],
-        ["止盈目标价", "%s（预算内最高可买回价）" % _num(tp.get("price_cap")), "价格≤该值才满足止盈预算"],
-        ["止盈目标标的价", target_underlying_line, "展示估算，不改变按期权买回价执行"],
-        ["风险退出预算", "%s ｜ 来源 %s ｜ %s" % (
-            _btc_usd_gap(risk.get("remaining_budget"), ctx.get("spot")),
-            risk.get("budget_source") or "—", risk_within), "风险触发后按配置门控自动评估"],
-        ["风险退出上限", "%s ｜ cap %s" % (_btc_usd_gap(risk.get("remaining_budget"), ctx.get("spot")), _num(risk.get("price_cap"))), "风险退出独立预算"],
-        ["风险退出盘口", risk_book_line, risk.get("reason") or "卖一深度需覆盖剩余短腿数量"],
-    ]}
-
-
-def _risk_hedge_table(ctx):
-    h = ctx.get("hedge_detail") or {}
-    data_gap = h.get("data_gap")
-    module_state = ("数据缺口：%s；禁新增对冲/仅保守持仓" % data_gap) if data_gap else (h.get("module_state") or "正常")
-    trigger_line = "观察 %s ｜ 开对冲 %s ｜ 紧急 %s" % (
-        _pct1(h.get("watch_probability")), _pct1(h.get("open_probability")), _pct1(h.get("emergency_probability")))
-    trigger_price = h.get("hedge_underlying_trigger_price")
-    if isinstance(trigger_price, (int, float)) and not isinstance(trigger_price, bool):
-        method = h.get("hedge_underlying_trigger_method") or "data_gap"
-        price_line = "%s（%s）" % (_num(trigger_price, small=2, big=2), method)
-    elif h.get("hedge_trigger_data_gap"):
-        price_line = "数据缺口:%s" % h.get("hedge_trigger_data_gap")
-    elif h.get("hedge_price_line") is not None:
-        price_line = _num(h.get("hedge_price_line"), small=2, big=2)
-    else:
-        price_line = "概率触发，无固定价线"
-    reduce_only = "reduce_only=%s" % ("是" if h.get("reduce_only") else "否")
-    policy_rows = []
-    if h.get("hedge_policy"):
-        pending = h.get("pending_order_id") or "—"
-        cooldown = "add_until %s ｜ reduce_until %s" % (
-            _num(h.get("add_cooldown_until"), small=0, big=0),
-            _num(h.get("reduce_cooldown_until"), small=0, big=0))
-        warnings = ",".join(h.get("policy_warnings") or []) or "—"
-        policy_rows = [
-            ["对冲控制器", "state=%s ｜ reason=%s ｜ pending=%s" % (
-                h.get("policy_state") or "—", h.get("policy_reason") or "—", pending),
-             "V313 reconciliation，读交易所仓位为真"],
-            ["控制器目标", "full %s ｜ eff %s ｜ current %s ｜ delta %s" % (
-                _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
-                _num(h.get("current_hedge_qty")), _num(h.get("policy_delta_to_trade"))),
-             "只按 eff-current 发单"],
-            ["控制器门控", "cross_bps %s ｜ %s ｜ cost_bps %s ｜ warn %s" % (
-                _num(h.get("policy_cross_bps")), cooldown,
-                _num(h.get("episode_cost_bps")), warnings),
-             "HARD 不被成本/滑点告警阻断"],
-        ]
-    return {"type": "table", "title": "风险与对冲", "cols": ["项目", "值", "备注"], "rows": [
-        ["模块状态", module_state, "reason=%s" % (",".join(h.get("reason_codes") or []) or "—")],
-        ["触界概率(入场/当前/漂移)", "%s / %s / %s" % (
-            _pct1(h.get("entry_touch_probability")),
-            _pct1(h.get("touch_probability_now")),
-            _pct_signed(h.get("touch_probability_drift"))), "风险严重度输入"],
-        ["对冲触发阈值", trigger_line, "来自入场风险锚"],
-        ["对冲触发目标价", price_line, "价格线仅作二次确认"],
-        ["期权净 delta", _num(h.get("net_option_delta")), "结构 delta=%s" % _num(h.get("net_delta"))],
-        ["对冲目标", "目标 %s ｜ 当前 %s ｜ 预计交易 %s" % (
-            _num(h.get("target")), _num(h.get("perp_qty")), _num(h.get("delta_to_trade"))), "数量单位随场所"],
-        ["对冲场所", "%s / %s / %s" % (h.get("venue") or "—", h.get("instrument") or "—", h.get("side") or "—"), "方向为将要交易方向"],
-        ["对冲动作", "%s ｜ %s" % (h.get("action_cn") or h.get("action") or "保持", reduce_only), "孤儿对冲会强制清理"],
-    ] + policy_rows}
-
-
-def _ledger_recovery_table(ctx):
-    ld = ctx.get("ledger_detail") or {}
-    rec = ld.get("reconciled")
-    rec_line = "已对齐" if rec is True else ("不一致" if rec is False else "数据缺口")
-    reasons = ",".join(ld.get("reconcile_reasons") or []) or "—"
-    orders = ld.get("active_orders") or []
-    order_line = "；".join("%s/%s" % (o.get("instrument_name") or "—", o.get("label") or "—") for o in orders) or "—"
-    recovery = "%s ｜ %s" % (ld.get("recovery_state") or "OK", "可新开" if ld.get("allow_new_open", True) else "禁新开")
-    return {"type": "table", "title": "记账/对账/恢复", "cols": ["项目", "值", "备注"], "rows": [
-        ["入场收入/成本", "短腿收入 %s ｜ 保护成本 %s" % (
-            _btc_usd_gap(ld.get("short_credit"), ctx.get("spot")),
-            _btc_usd_gap(ld.get("protection_cost"), ctx.get("spot"))), "冻结入场账本"],
-        ["入场手续费/净credit", "%s ｜ %s" % (
-            _btc_usd_gap(ld.get("entry_fees"), ctx.get("spot")),
-            _btc_usd_gap(ld.get("actual_net_credit"), ctx.get("spot"))), "实际成交后"],
-        ["退出支出/剩余预算", "%s ｜ %s" % (
-            _btc_usd_gap(ld.get("realized_exit_spend"), ctx.get("spot")),
-            _btc_usd_gap(ld.get("remaining_exit_budget"), ctx.get("spot"))), "用于止盈买回"],
-        ["执行历史", "入场%s ｜ 退出%s ｜ 保护回收%s ｜ 对冲%s" % (
-            ld.get("entry_fill_count") or 0, ld.get("exit_fill_count") or 0,
-            ld.get("protection_recovery_count") or 0, ld.get("hedge_fill_count") or 0), "已记录条数"],
-        ["交易所对账", "%s ｜ %s" % (rec_line, reasons), "快照 vs 真实期权持仓"],
-        ["数据质量", "%s ｜ 恢复接管缺口：%s ｜ 行情缺口：%s" % (
-            ld.get("data_quality_state") or "OK",
-            ",".join(ld.get("legacy_recovery_gaps") or []) or "无",
-            (ctx.get("position_detail") or {}).get("quote_gap") or (ctx.get("position_detail") or {}).get("pnl_data_gap") or "无"),
-         "纯计划轮冗余项已在持仓阶段隐藏"],
-        ["恢复状态", recovery, "启动恢复/孤儿状态"],
-        ["活动订单", order_line, "当前持仓相关未完成订单"],
-    ]}
-
-
-def disp_position_manage_tables(ctx):
-    return [
-        _position_manage_overview_table(ctx),
-        _take_profit_budget_table(ctx),
-        _risk_hedge_table(ctx),
-        _ledger_recovery_table(ctx),
-    ]
-
-
 def _header_color(ctx):
     reason = ctx.get("reason") or ""
     if reason == "STRUCTURE_OPEN":
@@ -2808,7 +2443,7 @@ def _header_color(ctx):
     return _C_GRAY
 
 
-# ---- 交互控制台（计划轮唯一交互入口；持仓后切换为当前环节摘要）----
+# ---- 交互控制台（状态栏顶部「交互页面」：阶段 + 门控 + 人工审计接收 + 待批方案确认码 + 操作提示）----
 
 _PHASE_CN = {
     "WAIT_MANUAL_AUDIT_GATE": "等待人工审计", "MANUAL_GATE": "人工审计门",
@@ -2822,14 +2457,14 @@ _PHASE_CN = {
 _HINTS = {
     "WAIT_MANUAL_AUDIT_GATE": "等待可交易人工审计；人工审计不可用/过期时禁新开仓，持仓管理继续",
     "MANUAL_GATE": "人工审计门模式：进场依据 MANUAL_PLANNING_ALLOWED、DIRECTION_BIAS、数量与风险参数",
-    "RECOMMEND_READY": "待批方案：点【执行】输入方案确认码进场",
-    "HARD_APPROVAL_WAIT": "待批方案：点【执行】输入方案确认码进场",
+    "RECOMMEND_READY": "待批方案：点【执行】输入方案确认码进场 ｜ 点【拒绝】放弃",
+    "HARD_APPROVAL_WAIT": "待批方案：点【执行】输入方案确认码进场 ｜ 点【拒绝】放弃",
     "PLAN_LOCKED": "方案已锁定·预提交复核中；复核通过且进场门开启才真实下单",
-    "POSITION_MANAGE": "无需交互，按配置门控自动管理；运行时只阅读状态栏",
+    "POSITION_MANAGE": "持仓中：达 80% 止盈资格后点【授权止盈】输入持仓授权码允许自动退出 ｜【撤销授权】撤销",
     "EXIT_CAMPAIGN": "退出活动中：逐 tick 买回短腿、不破止盈预算；预算内无法成交则暂停后重试",
     "LONG_RECOVERY": "短腿已归零·回收保护腿中；无 bid 记 LONG_RESIDUAL_ONLY，售出/结算后归档",
     "RECOVERY_BLOCKED": "启动恢复阻塞：账本与交易所持仓无法解释映射；禁开新仓，请人工核对",
-    "KILLED": "配置层 KILL_NEW_RISK 已开启：停新开仓；退出/对冲减仓/对账继续",
+    "KILLED": "已急停：停新开仓；退出/对冲减仓继续。点【恢复】重新对账并要求新计划硬批准",
 }
 
 
@@ -2840,11 +2475,15 @@ def _console_phase_cn(p):
 def disp_operation_hint(ctx):
     """据当前阶段 / 门控 / 人工审计裁决给出唯一操作提示串。"""
     g = ctx.get
-    phase = g("console_phase")
-    if phase == "POSITION_MANAGE":
-        return _HINTS["POSITION_MANAGE"]
     if g("kill_new_risk"):
         return _HINTS["KILLED"]
+    phase = g("console_phase")
+    # 风险触发后优先引导风险退出授权；退出不可执行时仲裁器再回退到对冲。
+    if phase == "POSITION_MANAGE" and g("risk_state") in ("HEDGE_READY", "EXIT_PREFERRED") \
+            and "已授权" not in (g("exit_auth_state") or ""):
+        return ("风险触发(%s)：点【风险退出授权】输入风险退出码 %s 允许越价限价退出"
+                "（成本封顶：RISK_EXIT_MAX_SPEND>0 用该值，否则用入场冻结退出预算）"
+                % (g("risk_state") or "—", g("risk_exit_auth_code") or "—"))
     if phase in _HINTS:
         return _HINTS[phase]
     sv = g("manual_verdict") or {}
@@ -2873,20 +2512,6 @@ def disp_in_flight_line(in_flight):
     for o in in_flight.get("orders") or []:
         labels.append("%s/%s" % (o.get("instrument_name") or "—", o.get("label") or "—"))
     return "%s 条 ｜ %s" % (in_flight.get("count"), "；".join(labels) or "—")
-
-
-def disp_entry_prot_order_line(order):
-    if not order:
-        return None
-    elapsed = order.get("wait_elapsed_ms")
-    elapsed_s = ("%ss" % int(elapsed / 1000)) if isinstance(elapsed, (int, float)) else "—"
-    mode = "taker兜底区" if order.get("taker_due") else "maker等待"
-    return "id=%s ｜ 价=%s ｜ 已等=%s ｜ %s" % (
-        order.get("order_id") or "—",
-        _num(order.get("price")),
-        elapsed_s,
-        mode,
-    )
 
 
 def disp_manual_gate_line(verdict):
@@ -2925,84 +2550,15 @@ def disp_risk_line(risk):
     return "%s%s" % (state, ("｜" + " ".join(extras)) if extras else "")
 
 
-def disp_pipeline_table(ctx):
-    """完整主链模块总览：持仓阶段只显示模块有效摘要，计划专用字段隐藏。"""
-    g = ctx.get
-    position_mode = _is_position_manage(ctx)
-    if position_mode:
-        rows = [
-            ["计划轮", "持仓管理中，暂停推新方案"],
-            ["执行模块", "%s ｜ entry=%s ｜ 活动订单=%s" % (
-                g("commit_reason") or "未触发",
-                g("entry_state") or "—",
-                (g("manage_in_flight_order") or {}).get("count") or 0)],
-            ["退出模块", "%s ｜ %s" % (g("exit_campaign_state") or "空闲", _take_profit_summary_cn(ctx))],
-            ["对冲模块", _hedge_summary_cn(ctx)],
-            ["记账/对账", _ledger_summary_cn(ctx)],
-            ["恢复模块", g("recovery_state") or (ctx.get("ledger_detail") or {}).get("recovery_state") or "OK"],
-        ]
-        return {"type": "table", "title": "完整主链模块回显", "cols": ["模块", "状态/关键输出"], "rows": rows}
-    pending = g("pending_candidates") or []
-    codes = ", ".join("#%s=%s" % (c.get("id"), c.get("confirm_code")) for c in pending) or "—"
-    pre = g("precommit")
-    pre_line = "未触发" if pre is None else ("通过" if pre.get("passed") else "✗ " + ",".join(pre.get("failed") or []))
-    budget = g("projected_budget") or {}
-    rows = [
-        ["计划轮", "%s ｜ 漏斗：%s" % (
-            "持仓管理中，暂停推新方案" if position_mode else (g("plan_build_reason") or "—"),
-            disp_diag_line(g("enum_diag")) if g("enum_diag") else "—")],
-        ["候选展示", "展示%s / 可锁定%s / VRP阻断%s / 来源=%s ｜ %s" % (
-            g("display_candidates_count") or 0,
-            g("lockable_candidates_count") or 0,
-            g("plan_vrp_blocked") or 0,
-            "固定库" if g("plan_library_frozen") else (g("menu_source") or "实时"),
-            g("not_lockable_reason") or "—")],
-        ["确认码", codes],
-        ["预提交", pre_line],
-        ["执行模块", "%s ｜ entry=%s ｜ order_intent=%s" % (
-            g("commit_reason") or "未触发", g("entry_state") or "—", len(g("order_intent") or []))],
-        ["预算模块", budget.get("decision") or "—"],
-        ["记账/恢复", _ledger_summary_cn(ctx)],
-        ["对冲模块", _hedge_summary_cn(ctx)],
-        ["退出模块", "%s ｜ %s" % (
-            g("exit_campaign_state") or "空闲", _take_profit_summary_cn(ctx),
-        )],
-    ]
-    return {"type": "table", "title": "完整主链模块回显", "cols": ["模块", "状态/关键输出"], "rows": rows}
-
-
 def disp_console_table(ctx):
-    """计划轮显示唯一确认入口；持仓阶段显示非交互摘要。"""
+    """交互控制台：每轮置顶。阶段 + 门控 + 人工审计接收 +（待批方案确认码 / 软授权 / 退出活动）+ 操作提示。
+    后续阶段（E2 确认码 / E5 软授权 / E6 退出进度）通过 ctx 字段填充对应行。"""
     g = ctx.get
-    position_mode = _is_position_manage(ctx)
     rows = [
         ["阶段", _console_phase_cn(g("console_phase"))],
         ["执行门控", disp_gate_line(g("gate_summary"))],
         ["人工审计接收", disp_manual_gate_line(g("manual_verdict"))],
     ]
-    if position_mode:
-        pd = g("position_detail") or {}
-        rows = [
-            ["阶段", _console_phase_cn(g("console_phase"))],
-            ["生命周期", pd.get("lifecycle") or disp_state_cn(g("state"))],
-            ["当前自动动作", str((g("action_arb") or {}).get("executable_action") or "保持观察")],
-        ]
-        _if = disp_in_flight_line(g("manage_in_flight_order"))
-        if _if:
-            rows.append(["活动订单", _if])
-        if g("take_profit_detail"):
-            rows.append(["止盈状态", _take_profit_summary_cn(ctx)])
-        _rl = disp_risk_line(g("risk_pkg"))
-        if _rl:
-            rows.append(["风险状态", _rl])
-        if g("hedge_detail"):
-            rows.append(["对冲状态", _hedge_summary_cn(ctx)])
-        elif g("hedge_data_gap"):
-            rows.append(["对冲数据", "%s：无法读取对冲仓位，禁新增对冲，仅保守持仓" % g("hedge_data_gap")])
-        combo = pd.get("combo_unrealized_pnl_usd")
-        rows.append(["组合浮盈亏", _usd_signed_value(combo) if isinstance(combo, (int, float)) else (pd.get("pnl_data_gap") or "数据缺口")])
-        rows.append(["操作提示", disp_operation_hint(ctx)])
-        return {"type": "table", "title": "当前环节摘要", "cols": ["项目", "值"], "rows": rows}
     for c in (g("pending_candidates") or []):
         rows.append(["待批 #%s" % c.get("id"),
                      "%s 确认码 %s" % (c.get("summary") or "—", c.get("confirm_code") or "—")])
@@ -3016,9 +2572,6 @@ def disp_console_table(ctx):
         nc = g("entry_net_credit")
         rows.append(["开仓活动", "%s%s" % (g("entry_state"),
                      ("｜净credit %.6g" % nc) if isinstance(nc, (int, float)) else "")])
-    prot_line = disp_entry_prot_order_line(g("entry_prot_order"))
-    if prot_line:
-        rows.append(["保护腿挂单", prot_line])
     arb = g("action_arb")
     if arb:
         line = str(arb.get("executable_action"))
@@ -3033,19 +2586,15 @@ def disp_console_table(ctx):
         rows.append(["风险", _rl])
     if g("hedge_data_gap"):
         rows.append(["对冲数据", "%s：无法读取对冲仓位，禁新增对冲，需人工核对" % g("hedge_data_gap")])
-    if position_mode and g("take_profit_detail"):
-        rows.append(["止盈", _take_profit_summary_cn(ctx)])
-    elif g("take_profit_ratio") is not None:
+    if g("exit_auth_state"):
+        rows.append(["软授权", g("exit_auth_state")])
+    if g("take_profit_ratio") is not None:
         rows.append(["止盈资格", g("take_profit_ratio")])
     if g("exit_campaign_state"):
         rows.append(["退出活动", g("exit_campaign_state")])
-    if position_mode and g("hedge_detail"):
-        rows.append(["对冲", _hedge_summary_cn(ctx)])
-    elif g("hedge_state"):
+    if g("hedge_state"):
         rows.append(["对冲", g("hedge_state")])
-    if position_mode and g("ledger_detail"):
-        rows.append(["记账/对账", _ledger_summary_cn(ctx)])
-    elif g("reconciled") is False:
+    if g("reconciled") is False:
         rows.append(["对账", "✗ 快照与交易所持仓不符（已记录，风险收口继续）"])
     rows.append(["操作提示", disp_operation_hint(ctx)])
     return {"type": "table", "title": "交互控制台", "cols": ["项目", "值"], "rows": rows}
@@ -3056,13 +2605,10 @@ def disp_status_panel(ctx, note=""):
     有方案库时显示方案库对比表；选用/置顶方案有腿时显示其明细/模拟/成本/检查。"""
     header = "%s ｜ %s%s" % (note or "进场流水线", disp_reason_cn(ctx.get("reason")),
                             _header_color(ctx))
-    position_mode = _is_position_manage(ctx)
-    tables = [disp_console_table(ctx), _overview_table(ctx), disp_pipeline_table(ctx)]
-    if ctx.get("menu") and not position_mode:     # 计划轮保留完整候选；持仓后不再推新方案干扰读屏。
+    tables = [disp_console_table(ctx), _overview_table(ctx)]   # 交互控制台置顶 + 概览
+    if ctx.get("menu"):                           # 策略选择明细（已并入到期/盈亏平衡价，无独立概要表）
         tables.append(disp_menu_table(ctx["menu"], ctx.get("selected_plan"), ctx.get("spot")))
-    if position_mode:
-        tables.extend(disp_position_manage_tables(ctx))
-    elif ctx.get("short_instrument"):
+    if ctx.get("short_instrument"):
         tables.append(_position_table(ctx))       # 保证金 + 成本（S:PM 与成本已合并为一张）
         if ctx.get("order_intent"):
             tables.append(disp_order_intent_table(ctx["order_intent"]))
@@ -3095,30 +2641,6 @@ def disp_log_menu(menu, spot):
 def disp_log_summary(ctx, note=""):
     """简明中文事件行（写入 Log 事件流）。"""
     g = ctx.get
-    if _is_position_manage(ctx):
-        pd = g("position_detail") or {}
-        tp = g("take_profit_detail") or {}
-        hd = g("hedge_detail") or {}
-        risk = g("risk_pkg") or {}
-        cr = risk.get("current_risk") or {}
-        tp_status = tp.get("status") or ("已达标" if tp.get("qualified") else ("未达标" if tp.get("ratio") is not None else "数据缺口"))
-        risk_line = disp_risk_line(risk)
-        if not risk_line and isinstance(hd.get("touch_probability_now"), (int, float)):
-            risk_line = "触界%.1f%%" % (hd.get("touch_probability_now") * 100)
-        if not risk_line and isinstance(cr.get("touch_probability_now"), (int, float)):
-            risk_line = "触界%.1f%%" % (cr.get("touch_probability_now") * 100)
-        hedge_line = hd.get("action_cn") or hd.get("hedge_pnl_state") or "保持"
-        combo = _usd_signed_value(pd.get("combo_unrealized_pnl_usd"))
-        return ("%s｜持仓管理｜%s｜止盈%s %s/%s｜风险%s｜对冲%s｜组合浮盈亏 %s" % (
-            note or "manual-gate",
-            pd.get("lifecycle") or disp_state_cn(g("state")),
-            tp_status,
-            _pct1(tp.get("ratio")),
-            _pct1(tp.get("target_ratio")),
-            risk_line or "数据缺口",
-            hedge_line,
-            combo,
-        ))
     ratio = g("margin_relief_ratio")
     ratio_s = ("%.1f%%" % (ratio * 100)) if isinstance(ratio, (int, float)) else "—"
     return ("%s ｜ 短 %s@%s ｜ 保 %s@%s ｜ 释放 %s ｜ %s" % (
@@ -3383,7 +2905,7 @@ def settlement_guard(remaining_short_qty, near_expiry, settled, perp_qty):
 # ===================== module: execution =====================
 # -*- coding: utf-8 -*-
 """
-执行层（exec_*，§10）：保护腿优先、短腿 maker-only、末日保护腿受控 taker 兜底。
+执行层（exec_*，§10）：保护腿优先、maker-only、只追一步、禁 taker。
 
 价格计算为纯函数（可单测）；下单/轮询/撤单走 dbt_*。
 进场门控经 gates.gate_decision(ENTRY)：ALLOW_ENTRY_TRADING=False（或 KILL_NEW_RISK /
@@ -3445,12 +2967,6 @@ def exec_sell_price(mark, best_bid, tick, step, meta=None):
     return exec_round_order_price("sell", max(p, floor_p), meta, tick)
 
 
-def exec_protection_maker_price(mark, best_bid, best_ask, tick, meta=None):
-    """买保护腿：挂标记价；若 mark 触及卖一，则压到 ask-tick 保持 maker。"""
-    cap = best_ask - tick if tick else best_ask
-    return exec_round_order_price("buy", min(mark, cap), meta, tick)
-
-
 def exec_price_for(side, mark, best_bid, best_ask, tick, step, meta=None):
     return (exec_buy_price(mark, best_ask, tick, step, meta) if side == "buy"
             else exec_sell_price(mark, best_bid, tick, step, meta))
@@ -3470,8 +2986,6 @@ def exec_quote(instrument):
         "mark_iv": t.get("mark_iv"),
         "best_bid": t.get("best_bid_price"),
         "best_ask": t.get("best_ask_price"),
-        "best_bid_amount": t.get("best_bid_amount"),
-        "best_ask_amount": t.get("best_ask_amount"),
         "tick": exec_effective_tick(meta, mark),
         "meta": meta,
         "underlying": t.get("underlying_price"),
@@ -3496,12 +3010,8 @@ def exec_plan_prices(side, instrument, amount):
     q = exec_quote(instrument)
     if not q or q.get("best_bid") is None or q.get("best_ask") is None:
         return {"instrument": instrument, "side": side, "amount": amount, "prices": [], "quote": q}
-    if side == "buy":
-        prices = [exec_protection_maker_price(
-            q["mark"], q["best_bid"], q["best_ask"], q["tick"], q.get("meta"))]
-    else:
-        prices = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s, q.get("meta"))
-                  for s in range(MAX_CHASE_STEPS + 1)]
+    prices = [exec_price_for(side, q["mark"], q["best_bid"], q["best_ask"], q["tick"], s, q.get("meta"))
+              for s in range(MAX_CHASE_STEPS + 1)]
     return {"instrument": instrument, "side": side, "amount": amount, "prices": prices,
             "mark": q.get("mark"), "best_bid": q.get("best_bid"), "best_ask": q.get("best_ask"),
             "spread_ratio": exec_spread_ratio(q)}
@@ -3529,7 +3039,7 @@ def _order_fee(order):
 
 def _execution_detail(leg, side, instrument, amount, intended_price, final_price,
                       filled, avg_price, order_id, quote, cancelled=False,
-                      remaining=None, order=None, taker=False):
+                      remaining=None, order=None):
     filled = filled or 0.0
     avg_price = avg_price if avg_price is not None else final_price
     q = quote or {}
@@ -3547,7 +3057,6 @@ def _execution_detail(leg, side, instrument, amount, intended_price, final_price
         "avg_price": avg_price, "order_id": order_id,
         "remaining": max(0.0, (amount or 0.0) - filled) if remaining is None else remaining,
         "cancelled": bool(cancelled),
-        "taker": bool(taker),
         "quote_mark": q.get("mark"), "quote_bid": q.get("best_bid"),
         "quote_ask": q.get("best_ask"), "quote_tick": q.get("tick"),
         "spread_cost_estimate": spread,
@@ -3658,8 +3167,7 @@ def exec_open_structure(short_instrument, protection_instrument, amount):
 
 # ---------- 开仓活动（entry campaign）：跨轮持久 maker、信用底线约束、保护腿先成交 ----------
 
-def _post_maker_once(side, instrument, amount, price, label, meta=None, quote=None, leg=None,
-                     wait_seconds=None):
+def _post_maker_once(side, instrument, amount, price, label, meta=None, quote=None, leg=None):
     """单次 post-only 挂单(给定价)，等一周期，查成交，撤未成交后再查捕捉晚到成交。返回 filled。"""
     if not amount or amount <= 0 or price is None or price <= 0:
         return _execution_detail(leg or label, side, instrument, amount, price, price,
@@ -3678,41 +3186,7 @@ def _post_maker_once(side, instrument, amount, price, label, meta=None, quote=No
         return _execution_detail(leg or label, side, instrument, amount,
                                  intended_price, price, 0.0, None, None, quote)
     oid = order.get("order_id")
-    wait_s = CHASE_WAIT_SECONDS if wait_seconds is None else wait_seconds
-    Sleep(int(wait_s * 1000))
-    st = _extract_order(dbt_get_order_state(oid)) or order
-    filled = st.get("filled_amount") or 0.0
-    avg = st.get("average_price") or price
-    cancelled = False
-    if st.get("order_state") not in ("filled",) and (amount - filled) > 0:
-        dbt_cancel(oid)
-        cancelled = True
-        st2 = _extract_order(dbt_get_order_state(oid)) or st
-        if (st2.get("filled_amount") or 0.0) > filled:
-            filled = st2.get("filled_amount")
-            avg = st2.get("average_price") or avg
-            st = st2
-    return _execution_detail(leg or label, side, instrument, amount,
-                              intended_price, price, filled, avg, oid, quote,
-                              cancelled=cancelled, order=st)
-
-
-def _post_taker_once(side, instrument, amount, price, label, meta=None, quote=None, leg=None):
-    if not amount or amount <= 0 or price is None or price <= 0:
-        return _execution_detail(leg or label, side, instrument, amount, price, price,
-                                 0.0, None, None, quote, taker=True)
-    intended_price = price
-    meta = meta or dbt_get_instrument(instrument) or {}
-    price = exec_round_order_price(side, price, meta)
-    resp = dbt_place_order(side, instrument, amount, price,
-                           post_only=False, reject_post_only=False, label=label)
-    order = _extract_order(resp)
-    if order is None:
-        return _execution_detail(leg or label, side, instrument, amount,
-                                 intended_price, price, 0.0, None, None, quote,
-                                 taker=True)
-    oid = order.get("order_id")
-    Sleep(1000)
+    Sleep(int(CHASE_WAIT_SECONDS * 1000))
     st = _extract_order(dbt_get_order_state(oid)) or order
     filled = st.get("filled_amount") or 0.0
     avg = st.get("average_price") or price
@@ -3727,186 +3201,11 @@ def _post_taker_once(side, instrument, amount, price, label, meta=None, quote=No
             st = st2
     return _execution_detail(leg or label, side, instrument, amount,
                              intended_price, price, filled, avg, oid, quote,
-                             cancelled=cancelled, order=st, taker=True)
-
-
-def _level_amount(level):
-    if isinstance(level, (list, tuple)) and len(level) >= 2:
-        return _float_or_none(level[1])
-    if isinstance(level, dict):
-        for k in ("amount", "quantity", "size"):
-            v = _float_or_none(level.get(k))
-            if v is not None:
-                return v
-    return None
-
-
-def _best_ask_depth(instrument, quote=None):
-    q = quote or {}
-    amount = _float_or_none(q.get("best_ask_amount"))
-    if amount is not None:
-        return amount
-    book = dbt_order_book(instrument, depth=1)
-    asks = (book or {}).get("asks") or []
-    return _level_amount(asks[0]) if asks else None
-
-
-def _entry_order_state(order_id):
-    try:
-        return _extract_order(dbt_get_order_state(order_id))
-    except Exception:
-        return None
-
-
-def _entry_filled_amount(order):
-    return _float_or_none((order or {}).get("filled_amount")) or 0.0
-
-
-def _entry_order_closed(order, target_amount=None):
-    if not order:
-        return False
-    state = order.get("order_state")
-    filled = _entry_filled_amount(order)
-    if state in ("filled", "cancelled", "rejected"):
-        return True
-    return target_amount is not None and filled >= target_amount - 1e-12
-
-
-def _protection_order_record(order, instrument, amount, price, now_ms, wait_start_ms, label):
-    oid = (order or {}).get("order_id")
-    if not oid:
-        return None
-    return {
-        "order_id": oid,
-        "instrument": instrument,
-        "price": price,
-        "amount": amount,
-        "filled_seen": _entry_filled_amount(order),
-        "placed_ms": now_ms,
-        "wait_start_ms": wait_start_ms,
-        "label": label,
-    }
-
-
-def _post_protection_maker(instrument, amount, price, quote, label, meta, now_ms, wait_start_ms):
-    if not amount or amount <= 0 or price is None or price <= 0:
-        detail = _execution_detail("protection", "buy", instrument, amount, price, price,
-                                   0.0, None, None, quote)
-        detail["prot_order"] = None
-        return detail
-    resp = dbt_place_order("buy", instrument, amount, price,
-                           post_only=True, reject_post_only=True, label=label)
-    order = _extract_order(resp)
-    detail = _execution_detail("protection", "buy", instrument, amount,
-                               price, price, 0.0, None,
-                               (order or {}).get("order_id"), quote, order=order)
-    detail["prot_order"] = _protection_order_record(
-        order, instrument, amount, price, now_ms, wait_start_ms, label)
-    return detail
-
-
-def _post_entry_protection_once(instrument, amount, maker_price, quote, attempt,
-                                short_price, fees, credit_floor, label, meta=None,
-                                prot_order=None, now_ms=None):
-    q = quote or {}
-    ask = q.get("best_ask")
-    now_ms = now_ms or 0
-    meta = meta or {}
-    active = dict(prot_order or {})
-    wait_start_ms = active.get("wait_start_ms") or now_ms
-    remaining = amount
-    filled_delta = 0.0
-    avg_price = None
-
-    if active.get("order_id"):
-        st = _entry_order_state(active.get("order_id"))
-        if st is None:
-            detail = _execution_detail("protection", "buy", instrument, amount,
-                                       active.get("price"), active.get("price"),
-                                       0.0, None, active.get("order_id"), q)
-            detail["prot_order"] = active
-            detail["reason"] = "PROTECTION_ORDER_STATE_UNKNOWN"
-            detail["active_order_only"] = True
-            return detail
-        total_filled = _entry_filled_amount(st)
-        seen = active.get("filled_seen") or 0.0
-        filled_delta = max(0.0, total_filled - seen)
-        avg_price = st.get("average_price") or active.get("price")
-        active["filled_seen"] = max(seen, total_filled)
-        remaining = max(0.0, amount - filled_delta)
-        if remaining <= 1e-12 or _entry_order_closed(st, active.get("amount")):
-            detail = _execution_detail("protection", "buy", instrument, amount,
-                                       active.get("price"), active.get("price"),
-                                       filled_delta, avg_price,
-                                       active.get("order_id"), q, order=st)
-            detail["prot_order"] = None
-            return detail
-
-        elapsed_ms = now_ms - wait_start_ms if now_ms else 0
-        target_changed = abs((active.get("price") or 0.0) - (maker_price or 0.0)) >= ((q.get("tick") or 0.0) - 1e-12)
-        taker_due = elapsed_ms >= ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
-        if not target_changed and not taker_due:
-            detail = _execution_detail("protection", "buy", instrument, amount,
-                                       active.get("price"), active.get("price"),
-                                       filled_delta, avg_price,
-                                       active.get("order_id"), q, order=st)
-            detail["prot_order"] = active
-            if filled_delta <= 0:
-                detail["active_order_only"] = True
-            return detail
-
-        dbt_cancel(active.get("order_id"))
-        st2 = _entry_order_state(active.get("order_id")) or st
-        total2 = _entry_filled_amount(st2)
-        if total2 > active.get("filled_seen", 0.0):
-            late_delta = total2 - active.get("filled_seen", 0.0)
-            filled_delta += late_delta
-            active["filled_seen"] = total2
-            avg_price = st2.get("average_price") or avg_price
-            remaining = max(0.0, amount - filled_delta)
-        if remaining <= 1e-12:
-            detail = _execution_detail("protection", "buy", instrument, amount,
-                                       active.get("price"), active.get("price"),
-                                       filled_delta, avg_price,
-                                       active.get("order_id"), q,
-                                       cancelled=True, order=st2)
-            detail["prot_order"] = None
-            return detail
-
-        if taker_due:
-            ask_depth = _best_ask_depth(instrument, q)
-            depth_ok = ask_depth is not None and ask_depth + 1e-12 >= remaining
-            credit_ok = (ask is not None
-                         and entry_net_credit(short_price, ask, remaining, fees) >= credit_floor)
-            if ask is not None and depth_ok and credit_ok:
-                taker = _post_taker_once("buy", instrument, remaining, ask,
-                                         label + "_taker", meta, quote=q, leg="protection")
-                taker_fill = taker.get("filled") or 0.0
-                total_fill = filled_delta + taker_fill
-                detail = _execution_detail("protection", "buy", instrument, amount,
-                                           active.get("price"), taker.get("final_price") or ask,
-                                           total_fill, taker.get("avg_price") or avg_price,
-                                           taker.get("order_id"), q,
-                                           cancelled=True, order=taker, taker=True)
-                detail["prot_order"] = None
-                detail["reason"] = "PROTECTION_TAKER_AFTER_WAIT"
-                return detail
-            Log("[entry][prot] taker_after_wait hold ask=%s depth=%s remaining=%s credit_ok=%s" %
-                (ask, ask_depth, remaining, credit_ok))
-
-        maker = _post_protection_maker(instrument, remaining, maker_price, q, label,
-                                       meta, now_ms, wait_start_ms)
-        maker["filled"] = filled_delta
-        maker["avg_price"] = avg_price or maker.get("avg_price")
-        return maker
-
-    return _post_protection_maker(instrument, amount, maker_price, q, label,
-                                  meta, now_ms, wait_start_ms)
+                             cancelled=cancelled, order=st)
 
 
 def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_tick_steps,
-                             attempt, prot_done_qty, short_done_qty, allow_live, label="entry",
-                             prot_order=None, now_ms=None):
+                             attempt, prot_done_qty, short_done_qty, allow_live, label="entry"):
     """开仓活动一轮：保护腿先成交，价格在「净 credit ≥ credit_floor」内逐 tick 改善(本轮档=min(attempt,信用上限档))。
     跨轮持久（每轮一次 post-only）。allow_live=False → 仅意图(dry)。
     返回 {quotes_ok, credit_ok, dry, prot_price, short_price, net_credit, n_used, prot_fill, short_fill, reason}。"""
@@ -3918,9 +3217,8 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
         return {"quotes_ok": False, "credit_ok": False, "dry": (not allow_live),
                 "prot_fill": 0.0, "short_fill": 0.0, "reason": "NO_QUOTE"}
     steps = max(0, int(max_tick_steps))
-    prot_maker_price = exec_protection_maker_price(
-        pq["mark"], pq["best_bid"], pq["best_ask"], pq["tick"], pq.get("meta"))
-    prot_buy_prices = [prot_maker_price for _n in range(steps + 1)]
+    prot_buy_prices = [exec_buy_price(pq["mark"], pq["best_ask"], pq["tick"], n, pq.get("meta"))
+                       for n in range(steps + 1)]
     short_sell_prices = [exec_sell_price(sq["mark"], sq["best_bid"], sq["tick"], n, sq.get("meta"))
                          for n in range(steps + 1)]
     fees = acct_option_fee_ccy(pq["mark"], amount) + acct_option_fee_ccy(sq["mark"], amount)
@@ -3938,12 +3236,10 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
                 "prot_fill": 0.0, "short_fill": 0.0, "reason": "ENTRY_DRYRUN"}
     prot_detail = _execution_detail("protection", "buy", prot_inst, 0.0,
                                     prot_price, prot_price, 0.0, None, None, pq)
-    prot_detail["prot_order"] = None
     if (prot_done_qty or 0.0) < amount - 1e-12:                 # 保护腿先成交（持久重挂）
-        prot_detail = _post_entry_protection_once(
-            prot_inst, amount - (prot_done_qty or 0.0), prot_price, pq, attempt,
-            short_price, fees, credit_floor, label + "_prot", pq.get("meta"),
-            prot_order=prot_order, now_ms=now_ms)
+        prot_detail = _post_maker_once("buy", prot_inst, amount - (prot_done_qty or 0.0),
+                                       prot_price, label + "_prot", pq.get("meta"),
+                                       quote=pq, leg="protection")
     prot_fill = prot_detail.get("filled") or 0.0
     short_cap = min(amount, (prot_done_qty or 0.0) + prot_fill) - (short_done_qty or 0.0)
     short_detail = _execution_detail("short", "sell", short_inst, 0.0,
@@ -3951,12 +3247,10 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
     if short_cap > 1e-12:                                       # 短腿数量 ≤ 已成交保护腿量
         short_detail = _post_maker_once("sell", short_inst, short_cap, short_price,
                                         label + "_short", sq.get("meta"),
-                                        quote=sq, leg="short",
-                                        wait_seconds=ENTRY_SHORT_ORDER_WAIT_SECONDS)
+                                        quote=sq, leg="short")
     short_fill = short_detail.get("filled") or 0.0
     fills = [d for d in (prot_detail, short_detail)
-             if (d.get("filled") or 0.0) > 0
-             or (d.get("order_id") and not d.get("active_order_only"))]
+             if (d.get("filled") or 0.0) > 0 or d.get("order_id")]
     prot_avg = prot_detail.get("avg_price") if prot_fill > 0 else None
     short_avg = short_detail.get("avg_price") if short_fill > 0 else None
     fee_used = sum((d.get("fee_used") or 0.0) for d in fills)
@@ -3967,7 +3261,6 @@ def exec_entry_campaign_step(prot_inst, short_inst, amount, credit_floor, max_ti
             "short_price": short_price, "net_credit": net_credit, "n_used": n,
             "prot_fill": prot_fill, "short_fill": short_fill,
             "prot_avg_price": prot_avg, "short_avg_price": short_avg,
-            "prot_order": prot_detail.get("prot_order"),
             "entry_fees": fee_used,
             "actual_net_credit_before_fees": actual_before,
             "actual_net_credit_after_fees": actual_after,
@@ -4020,7 +3313,7 @@ def exec_exit_buyback_step(short_instrument, target_amount, price_cap, allow_liv
             avg = st2.get("average_price") or avg
     detail = _execution_detail("exit_short", "buy", short_instrument, target_amount,
                                price, price, filled, avg, oid, q,
-                               cancelled=cancelled, order=st, taker=allow_taker)
+                               cancelled=cancelled, order=st)
     return {"filled": filled, "avg_price": avg, "dry": False, "price": price,
             "taker": allow_taker, "reason": "EXIT_STEP", **detail}
 
@@ -5336,13 +4629,11 @@ import urllib.request
 
 
 _MENU_KEY = "spm_plan_menu_v1"
-_MENU_META_KEY = "spm_plan_menu_meta_v1"
 _MANUAL_CONTEXT_KEY = "spm_manual_context_v1"
 _LAST_COMMAND_KEY = "spm_last_command_v1"
 _LAST = {"plan_ms": 0}
 # 选用方案明细锁定：启动时锁定一个方案的编号，之后不随方案库刷新而改变（重启复位）
 _LOCKED = {"detail_id": None}
-_HEDGE_POLICY_STATE_KEY = "spm_hedge_policy_v313_state"
 MANUAL_GATE_ISOLATION_TESTS_PASSED = True
 
 
@@ -5441,30 +4732,6 @@ def _first_in_width(prots, width_range=None):
     return None
 
 
-def _in_width(prots, width_range=None):
-    lo, hi = width_range or PROTECTION_WIDTH_RANGE
-    return [p for p in (prots or []) if lo <= p.get("_width", 1e18) <= hi]
-
-
-def _is_endgame_dte(dte_h, target_dte_h):
-    if not isinstance(dte_h, (int, float)) or isinstance(dte_h, bool):
-        return False
-    target = target_dte_h if isinstance(target_dte_h, (int, float)) else TARGET_DTE_HOURS
-    threshold = min(float(target), float(ENDGAME_DTE_HOURS))
-    return dte_h <= threshold + 1e-9
-
-
-def _width_range_for_dte(width_range, dte_h, target_dte_h):
-    lo, hi = width_range or PROTECTION_WIDTH_RANGE
-    if _is_endgame_dte(dte_h, target_dte_h):
-        lo = min(lo, ENDGAME_PROTECTION_WIDTH_MIN)
-    return lo, hi
-
-
-def _protection_choice_limit_for_dte(dte_h, target_dte_h):
-    return ENDGAME_PROTECTION_CHOICES_PER_SHORT if _is_endgame_dte(dte_h, target_dte_h) else 1
-
-
 def _execution_feasibility_cfg():
     return {"max_short_spread": MAX_SPREAD_RATIO,
             "max_protection_spread": MAX_SPREAD_RATIO,
@@ -5547,30 +4814,27 @@ def _build_menu(now_ms, spot, manual_context=None, _external_unused=None):
                 continue
             # 同期垂直：保护腿取同到期、更价外、腿宽达标者；长腿是定额风险封顶，
             # 便宜的 OTM 长腿正是所需 → **不套用过度虚值过滤**
-            active_width_range = _width_range_for_dte(width_range, s_dte_h, target_dte)
-            prot_choices = _in_width(legsel_protection_candidates(
-                s_insts, short["strike"], want_call, active_width_range,
-                None, 0.0), active_width_range)
-            prot_choices = prot_choices[:_protection_choice_limit_for_dte(s_dte_h, target_dte)]
-            if not prot_choices:
+            vprot = _first_in_width(legsel_protection_candidates(
+                s_insts, short["strike"], want_call, width_range,
+                None, 0.0))
+            if not vprot:
                 diag["无合格保护腿(腿宽内)"] += 1
                 continue
-            for vprot in prot_choices:
-                pq = quote_fn(vprot["instrument_name"])
-                if not pq or pq.get("mark") is None:
-                    continue
-                c = plan_assemble(amount, spot, MIN_MARGIN_RELIEF_RATIO, pref,
-                                  want_call, short, sq, vprot, pq,
-                                  None, pm_ok, model, s_dte_h, s_dte_h)
-                c["expiry_role"] = expiry_roles.get(s_exp)
-                _attach_execution_feasibility(c, sq, pq)
-                if (c.get("execution_feasibility") or {}).get("hard_gate_passed") is False:
-                    diag["执行不可行"] += 1
-                    continue
-                c["_re"] = {"short": short, "sq": sq, "prot": vprot, "pq": pq,
-                            "s_dte": s_dte_h, "p_dte": s_dte_h}
-                prelim.append(c)
-                diag["生成候选"] += 1
+            pq = quote_fn(vprot["instrument_name"])
+            if not pq or pq.get("mark") is None:
+                continue
+            c = plan_assemble(amount, spot, MIN_MARGIN_RELIEF_RATIO, pref,
+                              want_call, short, sq, vprot, pq,
+                              None, pm_ok, model, s_dte_h, s_dte_h)
+            c["expiry_role"] = expiry_roles.get(s_exp)
+            _attach_execution_feasibility(c, sq, pq)
+            if (c.get("execution_feasibility") or {}).get("hard_gate_passed") is False:
+                diag["执行不可行"] += 1
+                continue
+            c["_re"] = {"short": short, "sq": sq, "prot": vprot, "pq": pq,
+                        "s_dte": s_dte_h, "p_dte": s_dte_h}
+            prelim.append(c)
+            diag["生成候选"] += 1
 
     if not prelim:
         return [], pm_ok, model, ("NO_EXECUTION_FEASIBLE" if diag["执行不可行"] else "NO_CANDIDATE"), diag
@@ -5620,7 +4884,6 @@ def _ctx_base(state, spot, reason=None):
         "max_chase_steps": MAX_CHASE_STEPS, "min_required_ratio": MIN_MARGIN_RELIEF_RATIO,
         "reason": reason, "spot": spot, "amount": ORDER_AMOUNT,
         "selected_plan": None, "protection_mode": None,
-        "startup_self_check": _G(_SELF_CHECK_KEY),
     }
     return snap
 
@@ -5670,203 +4933,9 @@ def _ctx_with_menu(state, spot, reason, menu, selected_no, detail_plan):
     return ctx
 
 
-def _store_plan_trace(now_ms, reason=None, diag=None, menu_count=0, lockable_count=0,
-                      vrp_blocked=0, not_lockable_reason=None):
-    _G(_PLAN_TRACE_KEY, {
-        "ts": now_ms,
-        "reason": reason,
-        "diag": diag or {},
-        "menu_count": menu_count or 0,
-        "lockable_count": lockable_count or 0,
-        "vrp_blocked": vrp_blocked or 0,
-        "not_lockable_reason": not_lockable_reason,
-    })
-
-
-def _stable_menu_meta_valid(meta, manual_context):
-    """固定备选库是否仍属于当前人工上下文。"""
-    if not meta or not manual_context:
-        return False
-    if meta.get("manual_context_id") != manual_context.get("context_id"):
-        return False
-    if meta.get("manual_context_hash") != manual_context_hash(manual_context):
-        return False
-    if meta.get("config_signature") != manual_context.get("config_signature"):
-        return False
-    if meta.get("strategy_version") != STRATEGY_VERSION:
-        return False
-    return True
-
-
-def _load_stable_menu(manual_context):
-    menu = list(_G(_MENU_KEY) or [])
-    meta = _G(_MENU_META_KEY) or {}
-    if menu and _stable_menu_meta_valid(meta, manual_context):
-        return menu, meta
-    if menu or meta:
-        _G(_MENU_KEY, None)
-        _G(_MENU_META_KEY, None)
-    return [], {}
-
-
-def _store_stable_menu(menu, manual_context, now_ms, reason, diag, lockable_count,
-                       vrp_blocked, not_lockable_reason):
-    menu = list(menu or [])
-    meta = {
-        "ts": now_ms,
-        "manual_context_id": (manual_context or {}).get("context_id"),
-        "manual_context_hash": manual_context_hash(manual_context) if manual_context else None,
-        "config_signature": (manual_context or {}).get("config_signature"),
-        "strategy_version": STRATEGY_VERSION,
-        "reason": reason,
-        "diag": diag or {},
-        "menu_count": len(menu),
-        "lockable_count": lockable_count or 0,
-        "vrp_blocked": vrp_blocked or 0,
-        "not_lockable_reason": not_lockable_reason,
-    }
-    _G(_MENU_KEY, menu)
-    _G(_MENU_META_KEY, meta)
-    return meta
-
-
-def _annotate_menu_lock_state(menu, pending=None, not_lockable_reason=None):
-    rows = [dict(p) for p in (menu or [])]
-    codes = dict((c.get("id"), c.get("confirm_code")) for c in (pending or []))
-    for p in rows:
-        pid = p.get("id")
-        if pid in codes and codes[pid]:
-            p["_confirm_code"] = codes[pid]
-            p["_not_lockable_reason"] = None
-        elif not_lockable_reason:
-            p["_confirm_code"] = None
-            p["_not_lockable_reason"] = not_lockable_reason
-    return rows
-
-
-def _locked_display_candidate(locked, menu):
-    if not locked:
-        return None
-    plan_id = locked.get("plan_id")
-    short_i = locked.get("short_instrument")
-    long_i = locked.get("long_instrument")
-    for p in (menu or []):
-        if p.get("id") == plan_id or (
-                p.get("short_instrument") == short_i
-                and p.get("protection_instrument") == long_i):
-            row = dict(p)
-            row["_confirm_code"] = locked.get("confirm_code")
-            row["_locked"] = True
-            return row
-    return None
-
-
-def _fmt_event_value(v, digits=6):
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return ("%%.%df" % digits) % v
-    return "-"
-
-
-def _position_event_log_summary(ctx, note):
-    if not isinstance(ctx, dict) or ctx.get("console_phase") != "POSITION_MANAGE":
-        return None
-    step = ctx.get("hedge_step")
-    if isinstance(step, dict) and step:
-        return ("%s｜对冲订单｜方向=%s 数量=%s 成交=%s 均价=%s 原因=%s" %
-                (note or "manual-gate", step.get("side") or "-",
-                 _fmt_event_value(step.get("amount")),
-                 _fmt_event_value(step.get("filled")),
-                 _fmt_event_value(step.get("avg_price"), 2),
-                 step.get("reason") or "-"))
-    for key, label in (("hedge_data_gap", "对冲数据缺口"),
-                       ("order_state_gap", "订单状态缺口")):
-        if ctx.get(key):
-            return "%s｜%s｜数据缺口:%s" % (note or "manual-gate", label, ctx.get(key))
-    risk_detail = ctx.get("risk_exit_detail") or {}
-    if risk_detail.get("risk_exit_active") and risk_detail.get("reason"):
-        return "%s｜风险退出受限｜原因=%s" % (note or "manual-gate", risk_detail.get("reason"))
-    recovery_state = ctx.get("recovery_state")
-    if recovery_state and recovery_state != "OK":
-        return "%s｜恢复/对账异常｜%s" % (note or "manual-gate", recovery_state)
-    return None
-
-
 def _emit(ctx, note=""):
     LogStatus(disp_status_panel(ctx, note))
-    position_mode = (ctx or {}).get("console_phase") == "POSITION_MANAGE"
-    event_summary = _position_event_log_summary(ctx, note) if position_mode else None
-    if position_mode and event_summary is None:
-        return
-    summary = event_summary or disp_log_summary(ctx, note)
-    now_ms = ctx.get("now_ms") if isinstance(ctx, dict) else None
-    if not isinstance(now_ms, (int, float)) or isinstance(now_ms, bool):
-        now_ms = _now_ms()
-    last = _G(_LAST_LOG_SUMMARY_KEY)
-    last_ts = _G(_LAST_LOG_SUMMARY_TS_KEY) or 0
-    heartbeat_due = bool(position_mode and summary == last
-                         and now_ms - (last_ts or 0) >= POSITION_LOG_HEARTBEAT_MS)
-    if summary != last or heartbeat_due:
-        Log(summary)
-        _G(_LAST_LOG_SUMMARY_KEY, summary)
-        _G(_LAST_LOG_SUMMARY_TS_KEY, now_ms)
-
-
-def _check_result(ok, reason=None, detail=None):
-    out = {"ok": bool(ok)}
-    if reason:
-        out["reason"] = str(reason)
-    if detail is not None:
-        out["detail"] = detail
-    return out
-
-
-def _startup_self_check(currency):
-    """启动后一轮只读自检：配置、Deribit 行情/账户、GEX 数据、Binance 对冲读仓。"""
-    checks = {}
-    errs = validate_config()
-    checks["config"] = _check_result(not errs, ";".join(errs) if errs else None)
-    try:
-        px = dbt_index_price(currency)
-        ok = isinstance(px, (int, float)) and not isinstance(px, bool) and px > 0
-        checks["deribit_index"] = _check_result(ok, None if ok else "NO_INDEX_PRICE", px)
-    except Exception as e:
-        checks["deribit_index"] = _check_result(False, e)
-    try:
-        instruments = dbt_get_instruments(currency, "option") or []
-        checks["deribit_options"] = _check_result(
-            bool(instruments), None if instruments else "NO_OPTIONS", len(instruments))
-    except Exception as e:
-        checks["deribit_options"] = _check_result(False, e)
-    try:
-        account = dbt_account_summary(currency) or {}
-        checks["deribit_account"] = _check_result(
-            bool(account), None if account else "NO_ACCOUNT_SUMMARY",
-            account.get("margin_model") or account.get("account_type"))
-    except Exception as e:
-        checks["deribit_account"] = _check_result(False, e)
-    try:
-        verdict = fetch_gex_vrp_context(DIRECTION_BIAS)
-        checks["gex_context"] = _check_result(
-            bool(verdict.get("valid")), verdict.get("status"),
-            bool(verdict.get("market_context")))
-    except Exception as e:
-        checks["gex_context"] = _check_result(False, e)
-    if HEDGE_VENUE == "BINANCE":
-        try:
-            qty = bnc_get_position_btc(HEDGE_BINANCE_INSTRUMENT)
-            checks["binance_hedge_position"] = _check_result(
-                qty is not None, None if qty is not None else "HEDGE_POSITION_QUERY_FAILED", qty)
-        except Exception as e:
-            checks["binance_hedge_position"] = _check_result(False, e)
-    else:
-        checks["binance_hedge_position"] = _check_result(True, "SKIPPED_DERIBIT_HEDGE")
-    result = {
-        "overall": "OK" if all(v.get("ok") for v in checks.values()) else "WARN",
-        "checks": checks,
-        "checked_at_ms": _now_ms(),
-    }
-    _G(_SELF_CHECK_KEY, result)
-    return result
+    Log(disp_log_summary(ctx, note))
 
 
 # ---------- 计划轮 ----------
@@ -5946,11 +5015,6 @@ _LIB_KEY = "spm_reco_lib_v1"
 _LOCKED_KEY = "spm_locked_plan_v1"
 _RUNTIME_KILL_KEY = "spm_runtime_kill_v1"
 _LIB_BUILD_TS_KEY = "spm_lib_build_ts_v1"
-_PLAN_TRACE_KEY = "spm_plan_trace_v1"
-_LAST_LOG_SUMMARY_KEY = "spm_last_log_summary_v1"
-_LAST_LOG_SUMMARY_TS_KEY = "spm_last_log_summary_ts_v1"
-_SELF_CHECK_KEY = "spm_startup_self_check_v1"
-POSITION_LOG_HEARTBEAT_MS = 10 * 60 * 1000
 
 
 def _session_id():
@@ -5972,8 +5036,8 @@ def _bump_refresh_seq():
 
 
 def _effective_kill():
-    """只读取配置层 KILL_NEW_RISK；运行时不再提供急停交互命令。"""
-    return bool(KILL_NEW_RISK)
+    """配置急停 KILL_NEW_RISK 或运行时【急停】命令（_G）任一为真即急停。"""
+    return bool(KILL_NEW_RISK) or bool(_G(_RUNTIME_KILL_KEY))
 
 
 def _effective_gate_cfg():
@@ -6040,13 +5104,10 @@ def _manual_context_for_cycle(now_ms):
     return ctx
 
 
-def _clear_plan_lineage(clear_menu=True):
+def _clear_plan_lineage():
     _G(_LOCKED_KEY, None)
     _G(_LIB_KEY, None)
     _G(_LIB_BUILD_TS_KEY, 0)
-    if clear_menu:
-        _G(_MENU_KEY, None)
-        _G(_MENU_META_KEY, None)
 
 
 def _approval_expired(snapshot, now_ms):
@@ -6104,9 +5165,51 @@ def _handle_execute(code, now_ms):
 
 
 def _handle_command(ctype, cmd, now_ms):
+    if ctype == "KILL":
+        _G(_RUNTIME_KILL_KEY, True)
+        return "killed_new_risk"
+    if ctype == "RESUME":
+        _G(_RUNTIME_KILL_KEY, None)
+        _G(_LOCKED_KEY, None)                          # 恢复要求重新对账 + 新的计划硬批准
+        return "resumed_requires_new_plan_approval"
+    if ctype == "REJECT":
+        _G(_LOCKED_KEY, None)
+        return "rejected_back_to_wait"
     if ctype == "EXECUTE":
         return _handle_execute(cmd.get("arg"), now_ms)
-    return "ignored_non_execute_command"
+    if ctype == "EXIT_AUTHORIZE":
+        return _handle_exit_authorize(cmd.get("arg"), now_ms, POLICY_TAKE_PROFIT)
+    if ctype == "RISK_EXIT_AUTHORIZE":
+        return _handle_exit_authorize(cmd.get("arg"), now_ms, POLICY_RISK_EXIT)
+    if ctype == "EXIT_REVOKE":
+        return _handle_exit_revoke(now_ms)
+    return "noop"
+
+
+def _handle_exit_authorize(code, now_ms, policy):
+    """软授权：校验授权码与当前 position+policy 匹配 → 落 _G（与 position_id 绑定，非阻塞）。"""
+    snap = _G(_POSITION_KEY)
+    pos_id = (snap or {}).get("position_id")
+    if not pos_id:
+        return "no_position_to_authorize"
+    kw = {}
+    if policy == POLICY_RISK_EXIT:
+        # 风险退出：RISK_EXIT_MAX_SPEND=0 时只用入场冻结预算，不额外放大止损额度。
+        max_spend = RISK_EXIT_MAX_SPEND if RISK_EXIT_MAX_SPEND > 0 else (snap or {}).get("max_total_exit_spend")
+        kw = {"max_exit_spend": max_spend, "allowed_order_types": ["limit"]}
+    auth = authorize_from_code(code, pos_id, policy, now_ms, **kw)
+    if not auth:
+        return "auth_code_invalid"
+    _G(_EXIT_AUTH_KEY, auth)
+    return "authorized:" + policy
+
+
+def _handle_exit_revoke(now_ms):
+    auth = _G(_EXIT_AUTH_KEY)
+    if not auth:
+        return "no_authorization"
+    _G(_EXIT_AUTH_KEY, revoke(auth, now_ms))
+    return "revoked"
 
 
 def _dispatch_command(raw, meta, now_ms):
@@ -6168,46 +5271,6 @@ def _no_unknown_orders(currency, instruments):
         if o.get("instrument_name") in insts and not _label_known(o.get("label")):
             return False
     return True
-
-
-def _order_identity(order):
-    if not isinstance(order, dict):
-        return None
-    return order.get("order_id") or order.get("id") or order.get("Id") or order.get("OrderId")
-
-
-def _allowed_entry_order_ids(locked):
-    entry = (locked or {}).get("entry") or {}
-    ids = set()
-    prot = entry.get("prot_order") or {}
-    oid = _order_identity(prot)
-    if oid:
-        ids.add(str(oid))
-    return ids
-
-
-def _order_safety_status(currency, instruments, locked=None):
-    insts = set(i for i in instruments if i)
-    if not insts:
-        return {"ok": False, "reason": "NO_INSTRUMENTS"}
-    try:
-        orders = dbt_get_open_orders(currency)
-    except Exception:
-        return {"ok": False, "reason": "OPEN_ORDERS_QUERY_FAILED"}
-    if orders is None:
-        return {"ok": False, "reason": "OPEN_ORDERS_QUERY_FAILED"}
-    allowed_entry_ids = _allowed_entry_order_ids(locked)
-    for o in orders:
-        if (o or {}).get("instrument_name") not in insts:
-            continue
-        label = str((o or {}).get("label") or "")
-        if not _label_known(label):
-            return {"ok": False, "reason": "UNKNOWN_ACTIVE_ORDER", "order": o}
-        if label.startswith("entry"):
-            oid = _order_identity(o)
-            if not oid or str(oid) not in allowed_entry_ids:
-                return {"ok": False, "reason": "ENTRY_ACTIVE_ORDER_CONFLICT", "order": o}
-    return {"ok": True, "reason": None}
 
 
 def _quote_abs_spread(q):
@@ -6286,7 +5349,6 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
     reconciled = (rec.get("actual") == rec.get("expected"))
     manual_check = validate_manual_context(manual_context, now_ms)
     vrp_pass, vrp_gate = _vrp_recheck_locked(locked, spot, amount, sq, lq, manual_context)
-    order_safety = _order_safety_status(SETTLEMENT_CURRENCY, [short_i, long_i], locked)
     return {
         "manual_context_valid": manual_check.get("valid"),
         "manual_context_hash": manual_context_hash(manual_context) if manual_context else None,
@@ -6299,9 +5361,7 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
         "net_credit_after_costs": net_credit,
         "projected_budget_decision": budget.get("decision"),
         "ledger_reconciled": reconciled,
-        "no_unknown_orders": order_safety.get("ok") is True,  # C3：真实活动订单查询 + 同腿入场残单防重挂
-        "order_conflict_reason": order_safety.get("reason"),
-        "order_conflict_detail": order_safety.get("order"),
+        "no_unknown_orders": _no_unknown_orders(SETTLEMENT_CURRENCY, [short_i, long_i]),  # C3：真实活动订单查询
         "spread_ok": spread_ok,
         "spread_detail": {"short_ratio": ssr, "protection_ratio": lsr,
                           "protection_abs_spread": _quote_abs_spread(lq),
@@ -6504,8 +5564,8 @@ def _entry_progress_explained_by_positions(locked, prog, option_positions):
 
 def _attempt_commit(locked, spot, manual_context, now_ms):
     """锁定方案 → 预提交硬门 → **开仓活动(entry campaign)**：信用底线内 maker、保护腿先成交、
-    **跨轮持久保护腿订单**（仅随 mark 目标变化改价）。预提交不过/门控关 → 仅空跑预览；
-    两腿成交达标 → 冻结入场快照；保护腿 taker 兜底按首次挂单后的时间上限触发。"""
+    **跨轮持久重挂**（替代一次性追价）。预提交不过/门控关 → 仅空跑预览；两腿成交达标 → 冻结入场快照；
+    超 ENTRY_MAX_ATTEMPTS 仍未成交 → 放弃(撤/回退保护腿残量、清锁回等待)。低成本 ∧ 提高成功率。"""
     lib = _G(_LIB_KEY)
     live = _build_precommit_live(locked, spot, manual_context, now_ms)
     pre = evaluate_precommit_checks(locked, lib, live)
@@ -6516,7 +5576,6 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
                                         "entry_fee_used": 0.0, "entry_fills": []})
     prog.setdefault("entry_fee_used", 0.0)
     prog.setdefault("entry_fills", [])
-    prog.setdefault("prot_order", None)
     result = {"precommit": pre, "budget": live.get("_budget"), "committed": False,
               "entry_snapshot": None, "entry_state": None, "net_credit": None, "reason": None,
               "order_intent": [
@@ -6551,8 +5610,7 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
     step = exec_entry_campaign_step(long_i, short_i, amount, ENTRY_MIN_NET_CREDIT,
                                     ENTRY_MAX_TICK_STEPS, prog["attempts"],
                                     prog["prot_done"], prog["short_done"],
-                                    allow_live=gate["allowed"], label="entry",
-                                    prot_order=prog.get("prot_order"), now_ms=now_ms)
+                                    allow_live=gate["allowed"], label="entry")
     result["net_credit"] = step.get("net_credit")
     decision = entry_campaign_decision(
         True, step.get("quotes_ok"), step.get("credit_ok"), prog["attempts"], ENTRY_MAX_ATTEMPTS,
@@ -6573,14 +5631,11 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
         prog["short_credit"] += sf * (step.get("short_avg_price") or step.get("short_price") or 0.0)
         prog["entry_fee_used"] = (prog.get("entry_fee_used") or 0.0) + (step.get("entry_fees") or 0.0)
         prog["entry_fills"] = list(prog.get("entry_fills") or []) + list(step.get("fills") or [])
-        prog["prot_order"] = step.get("prot_order")
         prog["attempts"] += 1
         locked["entry"] = prog
         _G(_LOCKED_KEY, locked)
-        result["entry_prot_order"] = prog.get("prot_order")
-        if ((prog.get("short_done") or 0.0) > 1e-12
-                and not (prog["prot_done"] >= amount - 1e-12
-                         and prog["short_done"] >= amount - 1e-12)):
+        if _has_entry_progress(prog) and not (prog["prot_done"] >= amount - 1e-12
+                                             and prog["short_done"] >= amount - 1e-12):
             reason = ("SHORT_NOT_FILLED_AFTER_PROTECTION"
                       if (prog.get("short_done") or 0.0) <= 1e-12
                       else "PARTIAL_ENTRY_PROGRESS_AFTER_STEP")
@@ -6634,11 +5689,11 @@ def _attempt_commit(locked, spot, manual_context, now_ms):
         result["reason"] = "ENTRY_ABANDONED:" + decision["reason"]
         return result
     result["reason"] = decision["state"] + (":dry" if step.get("dry") else "")
-    result["entry_prot_order"] = prog.get("prot_order")
     return result
 
 
 _RECOVERY_KEY = "spm_recovery_verdict_v1"
+_EXIT_AUTH_KEY = "spm_exit_auth_v1"          # E5 软授权
 _CLOSED_HISTORY_KEY = "spm_closed_history_v1"
 
 
@@ -6647,13 +5702,14 @@ def _recovery_verdict():
 
 
 def _archive_closed(snap, now_ms):
-    """P0②：两腿 + 对冲 perp 均归零 → 归档 closed_position_history、清快照、置 CLOSED。"""
+    """P0②：两腿 + 对冲 perp 均归零 → 归档 closed_position_history、清快照/授权、置 CLOSED。"""
     hist = list(_G(_CLOSED_HISTORY_KEY) or [])
     rec = dict(snap or {})
     rec["closed_ts"] = now_ms
     hist.append(rec)
     _G(_CLOSED_HISTORY_KEY, hist[-50:])
     _G(_POSITION_KEY, None)
+    _G(_EXIT_AUTH_KEY, None)
     ledger_set_state(S_CLOSED)
 
 
@@ -6772,12 +5828,11 @@ def startup_recovery_check(currency):
     return verdict
 
 
-def _evaluate_take_profit(snap, quote_fn=None, now_ms=None):
+def _evaluate_take_profit(snap, quote_fn=None):
     """据入场快照 + 实时短腿盘口算止盈资格(参考捕获率) 与退出预算/价格上限。保护腿价值不入分母。"""
     if not snap:
         return {"ratio": None, "qualified": False, "remaining_short_qty": 0.0,
-                "remaining_budget": None, "price_cap": 0.0, "quote_ok": False,
-                "status": "数据缺口", "quote_gap": "NO_POSITION_SNAPSHOT"}
+                "remaining_budget": None, "price_cap": 0.0, "quote_ok": False}
     rem_qty = snap.get("remaining_short_qty") or 0.0
     quote = quote_fn or exec_quote
     q = quote(snap.get("short_instrument"))
@@ -6790,130 +5845,33 @@ def _evaluate_take_profit(snap, quote_fn=None, now_ms=None):
     est_fee = acct_option_fee_ccy(q["mark"], rem_qty) if quote_ok else None
     reserve = (max_spend * EXIT_RESERVE_RATIO) if isinstance(max_spend, (int, float)) else None
     ratio = reference_profit_capture_ratio(ceiling, cons_ref, est_fee, reserve)
-    capture_qualified = take_profit_qualified(ratio, snap.get("take_profit_target_ratio") or 0.80)
-    dte_h = _dte_hours_to(snap.get("short_expiry_ts"), now_ms if now_ms is not None else _now_ms())
-    min_dte = TAKE_PROFIT_MIN_DTE_HOURS
-    dte_gate_active = False
-    dte_gate_reason = None
-    qualified = capture_qualified
-    if capture_qualified and isinstance(min_dte, (int, float)) and not isinstance(min_dte, bool) and min_dte > 0:
-        if dte_h is None:
-            qualified = False
-            dte_gate_active = True
-            dte_gate_reason = "TP_DTE_DATA_GAP"
-        elif dte_h <= min_dte + 1e-12:
-            qualified = False
-            dte_gate_active = True
-            dte_gate_reason = "TP_DTE_TOO_CLOSE_TO_EXPIRY"
+    qualified = take_profit_qualified(ratio, snap.get("take_profit_target_ratio") or 0.80)
     fee_reserve = reserve or 0.0
     rem_budget = short_buyback_budget(max_spend, realized, fee_reserve)
     tick = (q or {}).get("tick") or 0.0
     cap = short_buyback_price_cap(rem_budget, fee_reserve, rem_qty, tick) if rem_budget else 0.0
-    status = ("交割临近持有" if dte_gate_active else
-              ("已达标" if qualified else ("未达标" if ratio is not None else "数据缺口")))
-    quote_gap = None if quote_ok else "NO_RELIABLE_QUOTE"
-    short_delta = (q or {}).get("delta")
-    target_underlying, target_gap = None, None
-    if quote_ok and isinstance(cap, (int, float)) and isinstance((q or {}).get("mark"), (int, float)):
-        if isinstance(short_delta, (int, float)) and abs(short_delta) > 1e-9:
-            spot = _spot_price()
-            if isinstance(spot, (int, float)):
-                target_underlying = spot + (cap - q.get("mark")) / short_delta
-            else:
-                target_gap = "SPOT_MISSING"
-        else:
-            target_gap = "SHORT_DELTA_MISSING"
-    elif not quote_ok:
-        target_gap = quote_gap
     return {"ratio": ratio, "qualified": qualified, "remaining_short_qty": rem_qty,
-            "remaining_budget": rem_budget, "price_cap": cap, "quote_ok": quote_ok,
-            "status": status, "quote_gap": quote_gap,
-            "capture_qualified": capture_qualified,
-            "remaining_dte_hours": dte_h,
-            "take_profit_min_dte_hours": min_dte,
-            "dte_gate_active": dte_gate_active,
-            "dte_gate_reason": dte_gate_reason,
-            "entry_profit_ceiling_net": ceiling,
-            "target_profit_amount": snap.get("target_profit_amount"),
-            "target_ratio": snap.get("take_profit_target_ratio") or 0.80,
-            "max_total_exit_spend": max_spend,
-            "realized_exit_spend": realized,
-            "short_buyback_ref": cons_ref,
-            "estimated_exit_fee": est_fee,
-            "exit_reserve": reserve,
-            "short_price_cap": cap,
-            "tp_underlying_target_price": target_underlying,
-            "tp_underlying_target_method": "delta_linear" if target_underlying is not None else "data_gap",
-            "tp_target_data_gap": target_gap,
-            "short_mark": (q or {}).get("mark"),
-            "short_bid": (q or {}).get("best_bid"),
-            "short_ask": (q or {}).get("best_ask"),
-            "short_delta": short_delta}
-
-
-def _risk_exit_level_amount(level):
-    if isinstance(level, (list, tuple)) and len(level) >= 2:
-        return level[1] if isinstance(level[1], (int, float)) and not isinstance(level[1], bool) else None
-    if isinstance(level, dict):
-        for key in ("amount", "quantity", "size"):
-            v = level.get(key)
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                return v
-    return None
-
-
-def _risk_exit_best_ask_depth(instrument, quote):
-    q = quote or {}
-    v = q.get("best_ask_amount")
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return v
-    try:
-        book = dbt_order_book(instrument, depth=1)
-    except Exception:
-        return None
-    asks = (book or {}).get("asks") or []
-    return _risk_exit_level_amount(asks[0]) if asks else None
+            "remaining_budget": rem_budget, "price_cap": cap, "quote_ok": quote_ok}
 
 
 def _risk_exit_budget_cap(snap, auth, quote_fn=None):
-    """风险退出预算/价格/深度上限：配置预算优先；缺深度 fail-closed。"""
-    inst = (snap or {}).get("short_instrument")
-    detail = {"remaining_budget": None, "price_cap": 0.0, "within": False,
-              "within_price": False, "quote_ok": False, "ask": None,
-              "ask_depth": None, "depth_ok": False, "reason": None}
-    max_spend = RISK_EXIT_MAX_SPEND if RISK_EXIT_MAX_SPEND > 0 else (snap or {}).get("max_total_exit_spend")
+    """风险退出预算/价格上限（F1）：用**风险退出授权**的 max_exit_spend(=RISK_EXIT_MAX_SPEND) 反推，
+    **独立于止盈 20% 缓冲**；并判定能否越价吃单(best_ask ≤ cap)。
+    无风险退出授权 / 无预算 / 无盘口 → (None, 0.0, False)（不可下单 → 仲裁回退对冲）。"""
+    max_spend = (auth or {}).get("max_exit_spend")
     rem_qty = (snap or {}).get("remaining_short_qty") or 0.0
     if not isinstance(max_spend, (int, float)) or max_spend <= 0 or rem_qty <= 0:
-        detail["reason"] = "NO_RISK_EXIT_BUDGET"
-        return detail
+        return None, 0.0, False
     quote = quote_fn or exec_quote
-    try:
-        q = quote(inst) or {}
-    except Exception:
-        detail["reason"] = "EXIT_QUOTE_DATA_GAP"
-        return detail
+    q = quote((snap or {}).get("short_instrument")) or {}
     realized = (snap or {}).get("realized_exit_spend") or 0.0
     fee_reserve = acct_option_fee_ccy(q.get("mark") or 0.0, rem_qty)
     rem_budget = short_buyback_budget(max_spend, realized, fee_reserve)
     tick = q.get("tick") or 0.0
     cap = short_buyback_price_cap(rem_budget, fee_reserve, rem_qty, tick) if rem_budget else 0.0
     ask = q.get("best_ask")
-    within_price = bool(ask is not None and cap > 0 and ask <= cap + 1e-12)
-    ask_depth = _risk_exit_best_ask_depth(inst, q) if inst else None
-    depth_ok = bool(ask_depth is not None and ask_depth + 1e-12 >= rem_qty)
-    detail.update({"remaining_budget": rem_budget, "price_cap": cap,
-                   "within_price": within_price, "quote_ok": ask is not None,
-                   "ask": ask, "ask_depth": ask_depth, "depth_ok": depth_ok,
-                   "within": bool(within_price and depth_ok)})
-    if ask is None:
-        detail["reason"] = "EXIT_QUOTE_DATA_GAP"
-    elif not within_price:
-        detail["reason"] = "EXIT_PRICE_ABOVE_CAP"
-    elif ask_depth is None:
-        detail["reason"] = "EXIT_DEPTH_DATA_GAP"
-    elif not depth_ok:
-        detail["reason"] = "EXIT_DEPTH_INSUFFICIENT"
-    return detail
+    within = bool(ask is not None and cap > 0 and ask <= cap + 1e-12)
+    return rem_budget, cap, within
 
 
 def _apply_exit_fill(snap, step, now_ms):
@@ -6943,11 +5901,8 @@ def _evaluate_hedge(snap, quote_fn=None):
     quote = quote_fn or exec_quote
     short_delta = (quote(si) or {}).get("delta") if si else None
     prot_delta = (quote(li) or {}).get("delta") if li else None
-    hedge_pnl_usd = None
     if vcfg["venue"] == "BINANCE":
-        snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
-        perp_qty = None if snap_bnc is None else snap_bnc.get("qty")
-        hedge_pnl_usd = None if snap_bnc is None else snap_bnc.get("unrealized_pnl_usd")
+        perp_qty = bnc_get_position_btc(vcfg["instrument"])
         contract_size, min_trade = 1.0, HEDGE_BINANCE_MIN_TRADE
     else:
         try:
@@ -6966,7 +5921,6 @@ def _evaluate_hedge(snap, quote_fn=None):
                 "net_delta": None, "net_option_delta": None,
                 "direction_consistent": True, "venue": vcfg["venue"],
                 "instrument": vcfg["instrument"], "venue_cfg": vcfg,
-                "unrealized_pnl_usd": hedge_pnl_usd,
                 "data_gap": "HEDGE_POSITION_DATA_GAP"}
     if state == "SETTLED":
         net_opt = 0.0
@@ -6980,7 +5934,6 @@ def _evaluate_hedge(snap, quote_fn=None):
                 "net_delta": None, "net_option_delta": None,
                 "direction_consistent": True, "venue": vcfg["venue"],
                 "instrument": vcfg["instrument"], "venue_cfg": vcfg,
-                "unrealized_pnl_usd": hedge_pnl_usd,
                 "data_gap": "HEDGE_DELTA_DATA_GAP"}
     else:
         net_opt = option_net_delta(rem_qty, short_delta, long_qty, prot_delta)
@@ -7000,447 +5953,7 @@ def _evaluate_hedge(snap, quote_fn=None):
             "net_delta": struct_delta, "net_option_delta": net_opt,
             "delta_to_trade": delta_to_trade,
             "direction_consistent": consistent,
-            "venue": vcfg["venue"], "instrument": vcfg["instrument"], "venue_cfg": vcfg,
-            "unrealized_pnl_usd": hedge_pnl_usd}
-
-
-def _hedge_policy_default_state(position_id=None):
-    return {
-        "policy": "V313",
-        "position_id": position_id,
-        "hedge_epoch": 0,
-        "full_target_qty": 0.0,
-        "eff_target_qty": 0.0,
-        "current_hedge_qty": 0.0,
-        "pending_order_id": None,
-        "pending_order_side": None,
-        "pending_order_qty": 0.0,
-        "pending_order_created_ts": 0,
-        "pending_is_add": False,
-        "pending_reduce_only": False,
-        "soft_since_ts": 0,
-        "reduce_since_ts": 0,
-        "add_cooldown_until": 0,
-        "reduce_cooldown_until": 0,
-        "last_fill_ts": 0,
-        "last_fill_qty": 0.0,
-        "last_fill_price": None,
-        "last_action": None,
-        "last_trigger_state": "NONE",
-        "last_p_now": None,
-        "last_drift": None,
-        "episode_cost_usdc": 0.0,
-        "episode_cost_bps": 0.0,
-    }
-
-
-def _hedge_policy_state(snap=None):
-    pos_id = (snap or {}).get("position_id")
-    st = _G(_HEDGE_POLICY_STATE_KEY)
-    if not isinstance(st, dict) or st.get("position_id") != pos_id:
-        st = _hedge_policy_default_state(pos_id)
-        _G(_HEDGE_POLICY_STATE_KEY, st)
-    return dict(st)
-
-
-def _hedge_policy_save_state(st):
-    _G(_HEDGE_POLICY_STATE_KEY, dict(st or {}))
-    return st
-
-
-def _hedge_policy_enabled_for(hedge):
-    return bool(HEDGE_POLICY_V313_ENABLED and (hedge or {}).get("venue") == "BINANCE")
-
-
-def _hedge_policy_order_filled(order):
-    if not isinstance(order, dict):
-        return 0.0
-    for k in ("DealAmount", "deal_amount", "filled_amount", "filled", "Filled"):
-        v = order.get(k)
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return float(v)
-    return 0.0
-
-
-def _hedge_policy_order_avg(order):
-    if not isinstance(order, dict):
-        return None
-    for k in ("AvgPrice", "avg_price", "average_price", "Price", "price"):
-        v = order.get(k)
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-            return float(v)
-    return None
-
-
-def _hedge_policy_order_active(order):
-    if not isinstance(order, dict):
-        return False
-    st = order.get("Status")
-    if st is None:
-        st = order.get("status") or order.get("State") or order.get("state")
-    if st in (0, "0", "open", "new", "NEW", "pending", "PARTIALLY_FILLED",
-              "partially_filled"):
-        return True
-    return False
-
-
-def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
-                         eff_target, current, delta, action, cross_bps,
-                         warnings=None, wants_action=False):
-    cr = (risk or {}).get("current_risk") or {}
-    detail = {
-        "policy": "V313",
-        "position_id": st.get("position_id"),
-        "state": trigger_state,
-        "trigger_state": trigger_state,
-        "reason": reason,
-        "warnings": list(warnings or []),
-        "full_target_qty": full_target,
-        "eff_target_qty": eff_target,
-        "current_hedge_qty": current,
-        "delta_to_trade": delta,
-        "pending_order_id": st.get("pending_order_id"),
-        "pending_order_side": st.get("pending_order_side"),
-        "pending_order_qty": st.get("pending_order_qty"),
-        "pending_order_created_ts": st.get("pending_order_created_ts"),
-        "cross_bps": cross_bps,
-        "soft_since_ts": st.get("soft_since_ts") or 0,
-        "reduce_since_ts": st.get("reduce_since_ts") or 0,
-        "add_cooldown_until": st.get("add_cooldown_until") or 0,
-        "reduce_cooldown_until": st.get("reduce_cooldown_until") or 0,
-        "last_fill_ts": st.get("last_fill_ts") or 0,
-        "last_fill_qty": st.get("last_fill_qty") or 0.0,
-        "last_fill_price": st.get("last_fill_price"),
-        "episode_cost_usdc": st.get("episode_cost_usdc") or 0.0,
-        "episode_cost_bps": st.get("episode_cost_bps") or 0.0,
-        "p_entry": cr.get("entry_touch_probability"),
-        "p_now": cr.get("touch_probability_now"),
-        "drift": cr.get("touch_probability_drift"),
-        "wants_action": bool(wants_action),
-    }
-    if (hedge or {}).get("data_gap"):
-        detail["data_gap"] = hedge.get("data_gap")
-    return detail
-
-
-def _hedge_policy_hold(hedge, st, risk, trigger_state, reason, full_target=None,
-                       eff_target=None, current=None, warnings=None,
-                       resolved_fill=None):
-    out = dict(hedge or {})
-    out["action"] = {"action": "HEDGE_HOLD", "reduce_only": False,
-                     "delta_contracts": 0.0, "blocked": reason}
-    out["delta_to_trade"] = 0.0
-    if resolved_fill:
-        out["policy_resolved_fill"] = resolved_fill
-    out["policy_detail"] = _hedge_policy_detail(
-        st, out, risk, trigger_state, reason, full_target, eff_target, current,
-        0.0, out["action"], HEDGE_SOFT_CROSS_BPS, warnings, wants_action=False)
-    return out
-
-
-def _hedge_policy_clear_pending(st):
-    st["pending_order_id"] = None
-    st["pending_order_side"] = None
-    st["pending_order_qty"] = 0.0
-    st["pending_order_created_ts"] = 0
-    st["pending_is_add"] = False
-    st["pending_reduce_only"] = False
-
-
-def _hedge_policy_record_pending_fill(st, order, now_ms):
-    filled = _hedge_policy_order_filled(order)
-    st["last_fill_ts"] = now_ms
-    st["last_fill_qty"] = filled
-    st["last_fill_price"] = _hedge_policy_order_avg(order)
-    st["last_action"] = "ADD" if st.get("pending_is_add") else "REDUCE"
-    if HEDGE_COOLDOWN_ENABLED:
-        if st.get("pending_is_add"):
-            st["reduce_cooldown_until"] = now_ms + HEDGE_REDUCE_COOLDOWN_SECONDS * 1000
-        else:
-            st["add_cooldown_until"] = now_ms + HEDGE_ADD_COOLDOWN_SECONDS * 1000
-
-
-def _hedge_policy_pending_fill_event(st, hedge, order, reason):
-    return {
-        "venue": "BINANCE",
-        "instrument": (hedge or {}).get("instrument") or HEDGE_BINANCE_INSTRUMENT,
-        "symbol": (hedge or {}).get("instrument") or HEDGE_BINANCE_INSTRUMENT,
-        "side": st.get("pending_order_side"),
-        "amount": st.get("pending_order_qty") or 0.0,
-        "filled": _hedge_policy_order_filled(order),
-        "avg_price": _hedge_policy_order_avg(order),
-        "order_id": st.get("pending_order_id"),
-        "reduce_only": bool(st.get("pending_reduce_only")),
-        "dry": False,
-        "reason": reason,
-    }
-
-
-def _hedge_policy_resolve_pending(st, hedge, risk, now_ms):
-    oid = st.get("pending_order_id")
-    if not oid:
-        return None
-    symbol = (hedge or {}).get("instrument") or HEDGE_BINANCE_INSTRUMENT
-    idx = ((hedge or {}).get("venue_cfg") or {}).get("exchange_index")
-    created = st.get("pending_order_created_ts") or 0
-    age = max(0, now_ms - created)
-    stale_ms = max(0, HEDGE_PENDING_STALE_SECONDS) * 1000
-    order = bnc_get_hedge_order(symbol, oid, idx=idx)
-    if order is None:
-        if age >= stale_ms:
-            if not bnc_cancel_hedge_order(symbol, oid, idx=idx):
-                return _hedge_policy_hold(hedge, st, risk, "HOLD",
-                                          "PENDING_STALE_CANCEL_FAILED")
-            _hedge_policy_clear_pending(st)
-            _hedge_policy_save_state(st)
-            return _hedge_policy_hold(hedge, st, risk, "HOLD",
-                                      "PENDING_STALE_RECOVERED")
-        return _hedge_policy_hold(hedge, st, risk, "HOLD", "PENDING_ACTIVE")
-    filled = _hedge_policy_order_filled(order)
-    active = _hedge_policy_order_active(order)
-    pending_qty = st.get("pending_order_qty") or 0.0
-    remaining = max(0.0, pending_qty - filled)
-    if filled > 0:
-        if active and remaining > 1e-12 and age < stale_ms:
-            st["last_fill_ts"] = now_ms
-            st["last_fill_qty"] = filled
-            st["last_fill_price"] = _hedge_policy_order_avg(order)
-            _hedge_policy_save_state(st)
-            return _hedge_policy_hold(hedge, st, risk, "HOLD",
-                                      "PENDING_PARTIAL_ACTIVE")
-        resolved = _hedge_policy_pending_fill_event(st, hedge, order,
-                                                    "PENDING_FILLED")
-        _hedge_policy_record_pending_fill(st, order, now_ms)
-        if active and remaining > 1e-12:
-            if not bnc_cancel_hedge_order(symbol, oid, idx=idx):
-                return _hedge_policy_hold(hedge, st, risk, "HOLD",
-                                          "PENDING_STALE_CANCEL_FAILED")
-            resolved["reason"] = "PENDING_STALE_PARTIAL_FILLED"
-        _hedge_policy_clear_pending(st)
-        _hedge_policy_save_state(st)
-        return _hedge_policy_hold(hedge, st, risk, "HOLD", resolved["reason"],
-                                  resolved_fill=resolved)
-    if active and age < stale_ms:
-        return _hedge_policy_hold(hedge, st, risk, "HOLD", "PENDING_ACTIVE")
-    if active:
-        if not bnc_cancel_hedge_order(symbol, oid, idx=idx):
-            return _hedge_policy_hold(hedge, st, risk, "HOLD",
-                                      "PENDING_STALE_CANCEL_FAILED")
-        _hedge_policy_clear_pending(st)
-        _hedge_policy_save_state(st)
-        return _hedge_policy_hold(hedge, st, risk, "HOLD", "PENDING_STALE_RECOVERED")
-    _hedge_policy_clear_pending(st)
-    _hedge_policy_save_state(st)
-    return _hedge_policy_hold(hedge, st, risk, "HOLD", "PENDING_CLEARED")
-
-
-def _hedge_policy_trigger_state(risk):
-    risk = risk or {}
-    codes = set(risk.get("reason_codes") or [])
-    cr = risk.get("current_risk") or {}
-    p_now = cr.get("touch_probability_now")
-    drift = cr.get("touch_probability_drift")
-    emergency = cr.get("emergency_probability")
-    open_p = cr.get("open_probability")
-    min_drift = cr.get("min_probability_drift_to_open") or 0.0
-    hard = ("BOUNDARY_BREACHED" in codes or "EMERGENCY_TOUCH_PROBABILITY" in codes)
-    if isinstance(p_now, (int, float)) and isinstance(emergency, (int, float)) and p_now >= emergency:
-        hard = True
-    if isinstance(drift, (int, float)) and drift >= HEDGE_HARD_DRIFT:
-        hard = True
-    if hard:
-        return "HARD"
-    soft = "TOUCH_PROBABILITY_DETERIORATED" in codes
-    if isinstance(p_now, (int, float)) and isinstance(open_p, (int, float)) and p_now >= open_p:
-        if not isinstance(drift, (int, float)) or drift >= min_drift:
-            soft = True
-    return "SOFT" if soft else "NONE"
-
-
-def _hedge_policy_action(current, eff_target, min_trade, forced_reason=None):
-    delta = (eff_target or 0.0) - (current or 0.0)
-    side = "buy" if delta > 0 else ("sell" if delta < 0 else None)
-    if abs(delta) < max(min_trade, 0.0):
-        return {"action": "HEDGE_HOLD", "reduce_only": False,
-                "delta_contracts": 0.0, "blocked": "LOT_DEADBAND"}, 0.0, None, False
-    reducing = abs(eff_target or 0.0) < abs(current or 0.0)
-    reduce_only = bool(reducing)
-    if abs(eff_target or 0.0) <= 1e-12:
-        name = "HEDGE_UNWIND"
-        reduce_only = True
-    elif reducing:
-        name = "HEDGE_REDUCE"
-    elif abs(current or 0.0) < min_trade:
-        name = "HEDGE_OPEN"
-    else:
-        name = "HEDGE_INCREASE"
-    if forced_reason in ("ORPHAN_HEDGE_UNWIND", "REVERSE_HEDGE_UNWIND"):
-        name = "HEDGE_UNWIND"
-        reduce_only = True
-    return {"action": name, "reduce_only": reduce_only,
-            "delta_contracts": abs(delta)}, delta, side, True
-
-
-def _hedge_policy_plan(snap, hedge, risk, now_ms):
-    if not _hedge_policy_enabled_for(hedge):
-        return hedge
-    st = _hedge_policy_state(snap)
-    pending = _hedge_policy_resolve_pending(st, hedge, risk, now_ms)
-    if pending is not None:
-        return pending
-
-    out = dict(hedge or {})
-    current = out.get("perp_qty")
-    full_target = out.get("target")
-    min_trade = HEDGE_BINANCE_MIN_TRADE
-    warnings = []
-    if out.get("data_gap") == "HEDGE_POSITION_DATA_GAP" or current is None:
-        st["current_hedge_qty"] = None
-        _hedge_policy_save_state(st)
-        return _hedge_policy_hold(out, st, risk, "HOLD", "POSITION_READ_FAILED",
-                                  full_target, None, None)
-    current = float(current or 0.0)
-    if full_target is None:
-        st["current_hedge_qty"] = current
-        _hedge_policy_save_state(st)
-        return _hedge_policy_hold(out, st, risk, "HOLD", out.get("data_gap") or "TARGET_DATA_GAP",
-                                  None, None, current)
-    full_target = float(full_target or 0.0)
-    rem_short = (snap or {}).get("remaining_short_qty") or 0.0
-    forced_reason = None
-    trigger_state = _hedge_policy_trigger_state(risk)
-    cr = (risk or {}).get("current_risk") or {}
-    p_now = cr.get("touch_probability_now")
-    drift = cr.get("touch_probability_drift")
-
-    if rem_short <= 1e-12 and abs(current) >= min_trade:
-        eff_target = 0.0
-        forced_reason = "ORPHAN_HEDGE_UNWIND"
-        trigger_state = "HOLD"
-    elif out.get("orphan") and abs(current) >= min_trade:
-        eff_target = 0.0
-        forced_reason = "ORPHAN_HEDGE_UNWIND"
-        trigger_state = "HOLD"
-    elif abs(current) >= min_trade and abs(full_target) >= min_trade and current * full_target < 0:
-        eff_target = 0.0
-        forced_reason = "REVERSE_HEDGE_UNWIND"
-        trigger_state = "HARD"
-    elif trigger_state == "HARD":
-        eff_target = full_target
-        forced_reason = "HARD_TRIGGER_EMERGENCY"
-    elif trigger_state == "SOFT":
-        if HEDGE_STAGING_ENABLED:
-            if not st.get("soft_since_ts"):
-                st["soft_since_ts"] = now_ms
-            persisted = (now_ms - (st.get("soft_since_ts") or now_ms)) >= HEDGE_SOFT_PERSIST_SECONDS * 1000
-            last_p = st.get("last_p_now")
-            worsened = (isinstance(p_now, (int, float)) and isinstance(last_p, (int, float))
-                        and p_now - last_p >= HEDGE_SOFT_ADD_DRIFT_STEP)
-            ratio = 1.0 if (persisted or worsened) else HEDGE_SOFT_INITIAL_RATIO
-            eff_target = full_target * ratio
-            forced_reason = "SOFT_TRIGGER_CONFIRMED" if ratio >= 1.0 else "SOFT_TRIGGER_INITIAL"
-        else:
-            eff_target = full_target
-            forced_reason = "SOFT_TRIGGER_CONFIRMED"
-    else:
-        st["soft_since_ts"] = 0
-        watch = cr.get("watch_probability")
-        buffer = HEDGE_REDUCE_PROB_BUFFER if HEDGE_HYSTERESIS_ENABLED else 0.0
-        if abs(current) >= min_trade and isinstance(p_now, (int, float)) \
-                and isinstance(watch, (int, float)) and p_now < watch:
-            if not st.get("reduce_since_ts"):
-                st["reduce_since_ts"] = now_ms
-            reduce_line = watch - buffer
-            persisted = (now_ms - (st.get("reduce_since_ts") or now_ms)) >= HEDGE_REDUCE_PERSIST_SECONDS * 1000
-            if HEDGE_HYSTERESIS_ENABLED and (p_now > reduce_line or not persisted):
-                st["full_target_qty"] = full_target
-                st["eff_target_qty"] = current
-                st["current_hedge_qty"] = current
-                st["last_trigger_state"] = trigger_state
-                st["last_p_now"] = p_now
-                st["last_drift"] = drift
-                _hedge_policy_save_state(st)
-                return _hedge_policy_hold(out, st, risk, "HOLD", "REDUCE_HYSTERESIS_WAIT",
-                                          full_target, current, current)
-            eff_target = 0.0
-            forced_reason = "REDUCE_CONFIRMED"
-            trigger_state = "HOLD"
-        else:
-            st["reduce_since_ts"] = 0
-            eff_target = 0.0 if abs(current) < min_trade else current
-            forced_reason = "NO_TRIGGER" if abs(current) < min_trade else "HOLD_EXISTING"
-            trigger_state = "NONE"
-
-    action, delta, side, wants = _hedge_policy_action(current, eff_target, min_trade, forced_reason)
-    reason = action.get("blocked") or forced_reason or "NO_TRIGGER"
-    is_add = wants and not action.get("reduce_only")
-    is_reduce = wants and action.get("reduce_only")
-    if is_add and trigger_state != "HARD" and HEDGE_COOLDOWN_ENABLED \
-            and (st.get("add_cooldown_until") or 0) > now_ms:
-        action = {"action": "HEDGE_HOLD", "reduce_only": False,
-                  "delta_contracts": 0.0, "blocked": "ADD_COOLDOWN_ACTIVE"}
-        delta = 0.0
-        side = None
-        wants = False
-        reason = "ADD_COOLDOWN_ACTIVE"
-    if is_reduce and forced_reason not in ("ORPHAN_HEDGE_UNWIND", "REVERSE_HEDGE_UNWIND") \
-            and HEDGE_COOLDOWN_ENABLED and (st.get("reduce_cooldown_until") or 0) > now_ms:
-        action = {"action": "HEDGE_HOLD", "reduce_only": False,
-                  "delta_contracts": 0.0, "blocked": "REDUCE_COOLDOWN_ACTIVE"}
-        delta = 0.0
-        side = None
-        wants = False
-        reason = "REDUCE_COOLDOWN_ACTIVE"
-    if (st.get("episode_cost_bps") or 0.0) > HEDGE_EPISODE_COST_ALERT_BPS:
-        warnings.append("EPISODE_COST_ALERT")
-    cross_bps = HEDGE_HARD_CROSS_BPS if trigger_state == "HARD" else HEDGE_SOFT_CROSS_BPS
-    out["action"] = action
-    if side:
-        out["side"] = side
-    out["delta_to_trade"] = delta
-    st["full_target_qty"] = full_target
-    st["eff_target_qty"] = eff_target
-    st["current_hedge_qty"] = current
-    st["last_trigger_state"] = trigger_state
-    st["last_p_now"] = p_now
-    st["last_drift"] = drift
-    _hedge_policy_save_state(st)
-    out["policy_detail"] = _hedge_policy_detail(
-        st, out, risk, trigger_state, reason, full_target, eff_target,
-        current, delta, action, cross_bps, warnings, wants_action=wants)
-    return out
-
-
-def _hedge_policy_submit(hedge, now_ms, allow_live=True):
-    detail = (hedge or {}).get("policy_detail") or {}
-    action = (hedge or {}).get("action") or {}
-    amount = action.get("delta_contracts") or 0.0
-    if action.get("action") == "HEDGE_HOLD" or amount <= 0:
-        return {"filled": 0.0, "dry": (not allow_live), "venue": "BINANCE",
-                "reason": action.get("blocked") or detail.get("reason") or "NO_OP"}
-    venue_cfg = (hedge or {}).get("venue_cfg") or {}
-    result = bnc_submit_hedge_order(
-        symbol=(hedge or {}).get("instrument") or HEDGE_BINANCE_INSTRUMENT,
-        side=(hedge or {}).get("side"),
-        amount=amount,
-        reduce_only=bool(action.get("reduce_only")),
-        cross_bps=detail.get("cross_bps") if detail.get("cross_bps") is not None else HEDGE_SOFT_CROSS_BPS,
-        allow_live=allow_live,
-        idx=venue_cfg.get("exchange_index"),
-        execution_style=HEDGE_OPEN_EXECUTION_STYLE)
-    oid = (result or {}).get("order_id")
-    if oid:
-        stored = _G(_HEDGE_POLICY_STATE_KEY)
-        st = dict(stored) if isinstance(stored, dict) else _hedge_policy_default_state()
-        st["pending_order_id"] = oid
-        st["pending_order_side"] = (hedge or {}).get("side")
-        st["pending_order_qty"] = amount
-        st["pending_order_created_ts"] = now_ms
-        st["pending_is_add"] = not bool(action.get("reduce_only"))
-        st["pending_reduce_only"] = bool(action.get("reduce_only"))
-        st["hedge_epoch"] = (st.get("hedge_epoch") or 0) + 1
-        _hedge_policy_save_state(st)
-    return result
+            "venue": vcfg["venue"], "instrument": vcfg["instrument"], "venue_cfg": vcfg}
 
 
 def _exit_friction_from_short_quote(short_quote):
@@ -7468,7 +5981,7 @@ def _evaluate_position_risk_now(snap, now_ms, existing_hedge=False, quote_fn=Non
     dte_h = _dte_hours_to(snap.get("short_expiry_ts"), now_ms)
     if dte_h is None:
         dte_h = anchor.get("entry_dte_hours")
-    out = evaluate_position_risk(
+    return evaluate_position_risk(
         position_id=snap.get("position_id"),
         direction_bias=_side_to_direction_bias(snap.get("side")),
         entry_risk_anchor=anchor, current_price=_spot_price(),
@@ -7478,16 +5991,6 @@ def _evaluate_position_risk_now(snap, now_ms, existing_hedge=False, quote_fn=Non
         gamma_regime=None,
         exit_friction=_exit_friction_from_short_quote(sq),
         existing_hedge=existing_hedge)
-    if out:
-        out["display_inputs"] = {
-            "direction_bias": _side_to_direction_bias(snap.get("side")),
-            "current_price": _spot_price(),
-            "dte_hours": dte_h,
-            "short_delta": sq.get("delta"),
-            "iv": sq.get("mark_iv"),
-            "loss_boundary": anchor.get("entry_loss_boundary"),
-        }
-    return out
 
 
 def _manage_in_flight_orders(snap, hedge):
@@ -7510,320 +6013,6 @@ def _manage_in_flight_orders(snap, hedge):
     return {"count": len(matched), "orders": matched[:5]}
 
 
-def _safe_mul(a, b):
-    return a * b if isinstance(a, (int, float)) and isinstance(b, (int, float)) else None
-
-
-def _safe_usd(btc_value, spot):
-    return btc_value * spot if isinstance(btc_value, (int, float)) and isinstance(spot, (int, float)) else None
-
-
-def _quote_display(q):
-    q = q or {}
-    return {"mark": q.get("mark"), "bid": q.get("best_bid"), "ask": q.get("best_ask")}
-
-
-def _hedge_pnl_display(hedge):
-    hedge = hedge or {}
-    qty = hedge.get("perp_qty")
-    if qty is None:
-        return None, "数据缺口:HEDGE_POSITION_DATA_GAP"
-    if abs(qty or 0.0) <= 1e-9:
-        return None, "对冲未启用"
-    for k in ("unrealized_pnl_usd", "unrealizedProfitUsd", "unRealizedProfit", "unrealized_profit_usd"):
-        v = hedge.get(k)
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return float(v), "OK"
-    return None, "数据缺口:HEDGE_PNL_DATA_GAP"
-
-
-def _probability_underlying_target(risk):
-    risk = risk or {}
-    policy = risk.get("hedge_trigger_policy") or {}
-    line = policy.get("hedge_price_line")
-    if isinstance(line, (int, float)) and not isinstance(line, bool):
-        return line, "explicit_line", None
-    cr = risk.get("current_risk") or {}
-    target_p = cr.get("open_probability")
-    inp = risk.get("display_inputs") or {}
-    direction = inp.get("direction_bias")
-    current = inp.get("current_price")
-    boundary = inp.get("loss_boundary")
-    dte = inp.get("dte_hours")
-    iv = inp.get("iv")
-    delta = inp.get("short_delta")
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool)
-               for x in (target_p, current, boundary, dte, iv)):
-        return None, "data_gap", "HEDGE_TRIGGER_PRICE_DATA_GAP"
-    if direction == "SHORT_CALL":
-        if current >= boundary:
-            return current, "probability_bisection", None
-        lo, hi = current, boundary
-        for _ in range(40):
-            mid = (lo + hi) / 2.0
-            p = estimate_touch_probability(direction, mid, boundary, dte, iv, delta)
-            if p >= target_p:
-                hi = mid
-            else:
-                lo = mid
-        return hi, "probability_bisection", None
-    if direction == "SHORT_PUT":
-        if current <= boundary:
-            return current, "probability_bisection", None
-        lo, hi = boundary, current
-        for _ in range(40):
-            mid = (lo + hi) / 2.0
-            p = estimate_touch_probability(direction, mid, boundary, dte, iv, delta)
-            if p >= target_p:
-                lo = mid
-            else:
-                hi = mid
-        return lo, "probability_bisection", None
-    return None, "data_gap", "HEDGE_TRIGGER_DIRECTION_GAP"
-
-
-def _position_lifecycle_cn(snap, exit_state=None, in_flight=None):
-    rem_short = (snap or {}).get("remaining_short_qty") or 0.0
-    long_rem = (snap or {}).get("long_remaining_qty")
-    if long_rem is None:
-        long_rem = (snap or {}).get("long_fill_amount") or 0.0
-    if (in_flight or {}).get("count"):
-        return "活动订单处理中"
-    if exit_state in (EXIT_WORKING_SHORT, EXIT_PAUSED_BUDGET, EXIT_PAUSED_DATA):
-        return "短腿退出中"
-    if rem_short <= 1e-12 and long_rem > 1e-12:
-        return "短腿已平·保护腿待回收"
-    if rem_short <= 1e-12 and long_rem <= 1e-12:
-        return "已归档/待归档"
-    return "已保护·卖方持仓"
-
-
-def _build_position_detail(snap, quote_fn, now_ms, exit_state=None, in_flight=None, hedge=None):
-    if not snap:
-        return None
-    short_i, long_i = snap.get("short_instrument"), snap.get("long_instrument")
-    quote_gaps = []
-    def _display_quote(inst, label):
-        if not inst:
-            return None
-        try:
-            return quote_fn(inst)
-        except Exception:
-            quote_gaps.append("%s_QUOTE_DATA_GAP" % label)
-            return None
-    sq = _display_quote(short_i, "SHORT")
-    lq = _display_quote(long_i, "LONG")
-    spot = _spot_price()
-    short_strike = snap.get("short_strike")
-    dist = ((short_strike - spot) / spot * 100.0
-            if isinstance(short_strike, (int, float)) and isinstance(spot, (int, float)) and spot else None)
-    long_rem = snap.get("long_remaining_qty")
-    if long_rem is None:
-        long_rem = snap.get("long_fill_amount") or 0.0
-    short_mark = _quote_display(sq).get("mark")
-    long_mark = _quote_display(lq).get("mark")
-    pnl_gaps = []
-    short_pnl_btc = None
-    if all(isinstance(x, (int, float)) for x in (snap.get("short_fill_price"), short_mark, snap.get("remaining_short_qty"))):
-        short_pnl_btc = (snap.get("short_fill_price") - short_mark) * (snap.get("remaining_short_qty") or 0.0)
-    else:
-        pnl_gaps.append("OPTION_SHORT_PNL_DATA_GAP")
-    long_pnl_btc = None
-    if all(isinstance(x, (int, float)) for x in (snap.get("long_fill_price"), long_mark, long_rem)):
-        long_pnl_btc = (long_mark - snap.get("long_fill_price")) * long_rem
-    else:
-        pnl_gaps.append("OPTION_LONG_PNL_DATA_GAP")
-    option_pnl_btc = None
-    if short_pnl_btc is not None and long_pnl_btc is not None:
-        option_pnl_btc = short_pnl_btc + long_pnl_btc
-    hedge_pnl_usd, hedge_pnl_state = _hedge_pnl_display(hedge)
-    option_pnl_usd = _safe_usd(option_pnl_btc, spot)
-    combo_pnl_usd = None
-    if option_pnl_usd is not None:
-        combo_pnl_usd = option_pnl_usd + (hedge_pnl_usd or 0.0)
-    if hedge_pnl_state and hedge_pnl_state.startswith("数据缺口"):
-        pnl_gaps.append(hedge_pnl_state.split(":", 1)[1])
-    detail = {
-        "lifecycle": _position_lifecycle_cn(snap, exit_state, in_flight),
-        "short_instrument": short_i,
-        "long_instrument": long_i,
-        "remaining_short_qty": snap.get("remaining_short_qty") or 0.0,
-        "long_remaining_qty": long_rem,
-        "short_fill_price": snap.get("short_fill_price"),
-        "long_fill_price": snap.get("long_fill_price"),
-        "short_strike": short_strike,
-        "long_strike": snap.get("long_strike"),
-        "breakeven": snap.get("breakeven"),
-        "dte_hours": _dte_hours_to(snap.get("short_expiry_ts"), now_ms),
-        "short_distance_pct": dist,
-        "quote_gap": ",".join(quote_gaps) if quote_gaps else None,
-        "option_short_unrealized_pnl_usd": _safe_usd(short_pnl_btc, spot),
-        "option_long_unrealized_pnl_usd": _safe_usd(long_pnl_btc, spot),
-        "option_unrealized_pnl_usd": option_pnl_usd,
-        "hedge_unrealized_pnl_usd": hedge_pnl_usd,
-        "hedge_pnl_state": hedge_pnl_state,
-        "combo_unrealized_pnl_usd": combo_pnl_usd,
-        "pnl_data_gap": ",".join(pnl_gaps) if pnl_gaps else None,
-    }
-    detail.update({
-        "short_mark": short_mark,
-        "short_bid": _quote_display(sq).get("bid"),
-        "short_ask": _quote_display(sq).get("ask"),
-        "long_mark": long_mark,
-        "long_bid": _quote_display(lq).get("bid"),
-        "long_ask": _quote_display(lq).get("ask"),
-    })
-    return detail
-
-
-_HEDGE_ACTION_CN = {
-    "HEDGE_HOLD": "保持",
-    "HEDGE_OPEN": "新开对冲",
-    "HEDGE_INCREASE": "增加对冲",
-    "HEDGE_REDUCE": "减少对冲",
-    "HEDGE_UNWIND": "清理/反向归零",
-}
-
-
-def _build_hedge_detail(hedge, risk):
-    hedge = hedge or {}
-    action = hedge.get("action") or {}
-    hp = hedge.get("policy_detail") or {}
-    risk = risk or {}
-    cr = risk.get("current_risk") or {}
-    policy = risk.get("hedge_trigger_policy") or {}
-    data_gap = hedge.get("data_gap")
-    if risk.get("market_data_gap"):
-        data_gap = data_gap or "RISK_MARKET_DATA_GAP"
-    action_name = action.get("action") or "HEDGE_HOLD"
-    action_cn = "清理孤儿对冲" if hedge.get("orphan") and action.get("reduce_only") else _HEDGE_ACTION_CN.get(action_name, action_name)
-    trigger_price, trigger_method, trigger_gap = _probability_underlying_target(risk)
-    hedge_pnl_usd, hedge_pnl_state = _hedge_pnl_display(hedge)
-    detail = {
-        "module_state": "数据缺口" if data_gap else "正常",
-        "data_gap": data_gap,
-        "venue": hedge.get("venue"),
-        "instrument": hedge.get("instrument"),
-        "side": hedge.get("side"),
-        "action": action_name,
-        "action_cn": action_cn,
-        "reduce_only": action.get("reduce_only"),
-        "delta_contracts": action.get("delta_contracts"),
-        "target": hedge.get("target"),
-        "perp_qty": hedge.get("perp_qty"),
-        "delta_to_trade": hedge.get("delta_to_trade"),
-        "net_option_delta": hedge.get("net_option_delta"),
-        "net_delta": hedge.get("net_delta"),
-        "orphan": hedge.get("orphan"),
-        "direction_consistent": hedge.get("direction_consistent"),
-        "entry_touch_probability": cr.get("entry_touch_probability"),
-        "touch_probability_now": cr.get("touch_probability_now"),
-        "touch_probability_drift": cr.get("touch_probability_drift"),
-        "watch_probability": cr.get("watch_probability"),
-        "open_probability": cr.get("open_probability"),
-        "emergency_probability": cr.get("emergency_probability"),
-        "hedge_price_line": policy.get("hedge_price_line"),
-        "hedge_underlying_trigger_price": trigger_price,
-        "hedge_underlying_trigger_method": trigger_method,
-        "hedge_trigger_data_gap": trigger_gap,
-        "hedge_unrealized_pnl_usd": hedge_pnl_usd,
-        "hedge_pnl_state": hedge_pnl_state,
-        "reason_codes": risk.get("reason_codes") or [],
-    }
-    if hp:
-        detail.update({
-            "hedge_policy": hp.get("policy"),
-            "policy_state": hp.get("state") or hp.get("trigger_state"),
-            "policy_reason": hp.get("reason"),
-            "policy_warnings": hp.get("warnings") or [],
-            "full_target_qty": hp.get("full_target_qty"),
-            "eff_target_qty": hp.get("eff_target_qty"),
-            "current_hedge_qty": hp.get("current_hedge_qty"),
-            "policy_delta_to_trade": hp.get("delta_to_trade"),
-            "pending_order_id": hp.get("pending_order_id"),
-            "pending_order_side": hp.get("pending_order_side"),
-            "pending_order_qty": hp.get("pending_order_qty"),
-            "policy_cross_bps": hp.get("cross_bps"),
-            "soft_since_ts": hp.get("soft_since_ts"),
-            "reduce_since_ts": hp.get("reduce_since_ts"),
-            "add_cooldown_until": hp.get("add_cooldown_until"),
-            "reduce_cooldown_until": hp.get("reduce_cooldown_until"),
-            "episode_cost_bps": hp.get("episode_cost_bps"),
-            "episode_cost_usdc": hp.get("episode_cost_usdc"),
-            "policy_p_entry": hp.get("p_entry"),
-            "policy_p_now": hp.get("p_now"),
-            "policy_drift": hp.get("drift"),
-        })
-    return detail
-
-
-def _build_risk_exit_detail(risk_exit, exit_detail):
-    exit_detail = exit_detail or {}
-    max_spend = RISK_EXIT_MAX_SPEND if RISK_EXIT_MAX_SPEND > 0 else None
-    return {
-        "policy_code": "AUTO_CONFIG",
-        "max_exit_spend": max_spend,
-        "budget_source": "RISK_EXIT_MAX_SPEND" if isinstance(max_spend, (int, float)) and max_spend > 0 else "冻结退出预算",
-        "remaining_budget": exit_detail.get("remaining_budget"),
-        "price_cap": exit_detail.get("price_cap"),
-        "within": exit_detail.get("within"),
-        "within_price": exit_detail.get("within_price"),
-        "quote_ok": exit_detail.get("quote_ok"),
-        "ask": exit_detail.get("ask"),
-        "ask_depth": exit_detail.get("ask_depth"),
-        "depth_ok": exit_detail.get("depth_ok"),
-        "reason": exit_detail.get("reason"),
-        "risk_exit_active": bool(risk_exit),
-    }
-
-
-def _build_ledger_detail(snap, rec, recovery, in_flight, tp):
-    snap = snap or {}
-    report = snap.get("entry_execution_report") or {}
-    short_credit = report.get("total_short_credit")
-    if short_credit is None:
-        short_credit = _safe_mul(snap.get("short_fill_price"), snap.get("short_fill_amount"))
-    protection_cost = report.get("total_protection_cost")
-    if protection_cost is None:
-        protection_cost = _safe_mul(snap.get("long_fill_price"), snap.get("long_fill_amount"))
-    entry_fees = report.get("total_fee_estimate")
-    if entry_fees is None:
-        entry_fees = snap.get("entry_fees")
-    net_credit = report.get("actual_net_credit_after_fees")
-    if net_credit is None:
-        net_credit = snap.get("entry_profit_ceiling_net")
-    rec = rec or {}
-    recovery = recovery or {}
-    legacy_gaps = []
-    for key, label in (
-        ("breakeven", "BREAKEVEN_MISSING"),
-        ("short_strike", "SHORT_STRIKE_MISSING"),
-        ("long_strike", "LONG_STRIKE_MISSING"),
-        ("entry_execution_report", "ENTRY_EXECUTION_REPORT_MISSING"),
-    ):
-        if snap and not snap.get(key):
-            legacy_gaps.append(label)
-    return {
-        "short_credit": short_credit,
-        "protection_cost": protection_cost,
-        "entry_fees": entry_fees,
-        "actual_net_credit": net_credit,
-        "realized_exit_spend": snap.get("realized_exit_spend") or 0.0,
-        "remaining_exit_budget": (tp or {}).get("remaining_budget"),
-        "entry_fill_count": report.get("fill_count") or len(report.get("fills") or []),
-        "exit_fill_count": len(snap.get("exit_execution_history") or []),
-        "protection_recovery_count": len(snap.get("protection_recovery_history") or []),
-        "hedge_fill_count": len(snap.get("hedge_execution_history") or []),
-        "reconciled": rec.get("reconciled"),
-        "reconcile_reasons": rec.get("reasons") or [],
-        "recovery_state": recovery.get("state") or "OK",
-        "allow_new_open": recovery.get("allow_new_open", True),
-        "active_orders": (in_flight or {}).get("orders") or [],
-        "data_quality_state": "恢复接管缺口" if legacy_gaps else "OK",
-        "legacy_recovery_gaps": legacy_gaps,
-    }
-
-
 def manage_cycle(now_ms):
     """持仓管理一轮（§9.1）：对账(快照为真相) + 止盈资格；退出/对冲由四输出仲裁**单动作收口**
     （每轮仅执行 executable 的风险动作）；短腿归零后回收保护腿(清理)；两腿+对冲 perp 归零→归档 CLOSED。
@@ -7831,8 +6020,10 @@ def manage_cycle(now_ms):
     snap = _G(_POSITION_KEY)
     pos_id = (snap or {}).get("position_id")
     recovery = _recovery_verdict()
-    auth = None
-    authorized = bool(snap)
+    auth = _G(_EXIT_AUTH_KEY)
+    authorized = is_authorized(auth, pos_id, now_ms)
+    tp_code = auth_code(pos_id, POLICY_TAKE_PROFIT) if pos_id else None
+    risk_code = auth_code(pos_id, POLICY_RISK_EXIT) if pos_id else None
     try:
         opt_pos = dbt_get_positions(SETTLEMENT_CURRENCY, "option") or []
     except Exception:
@@ -7840,7 +6031,7 @@ def manage_cycle(now_ms):
     rec = position_reconcile(snap, opt_pos)        # P0①：快照 vs 交易所（surfaced；不阻断风险收口）
 
     quote_fn = _quote_cache()
-    tp = _evaluate_take_profit(snap, quote_fn, now_ms)
+    tp = _evaluate_take_profit(snap, quote_fn)
     rem_short = tp["remaining_short_qty"]
     long_rem = (snap or {}).get("long_remaining_qty")
     if long_rem is None:
@@ -7851,29 +6042,18 @@ def manage_cycle(now_ms):
     in_flight = _manage_in_flight_orders(snap, hedge)
     existing_hedge = abs(hedge.get("perp_qty") or 0.0) > 1e-9
     risk = _evaluate_position_risk_now(snap, now_ms, existing_hedge, quote_fn)
-    hedge = _hedge_policy_plan(snap, hedge, risk, now_ms)
-    resolved_hedge_fill = (hedge or {}).get("policy_resolved_fill")
-    if resolved_hedge_fill and snap:
-        _append_execution_history(snap, "hedge_execution_history", resolved_hedge_fill, now_ms)
-        _G(_POSITION_KEY, snap)
     risk_state = (risk or {}).get("tail_risk_state")
     hedge_ready = risk_state == STATE_HEDGE_READY            # 风险概率相对入场锚恶化
     exit_preferred = hedge_ready                             # 风险触发时先尝试授权退出，不可执行再回退对冲
-    policy_wants_hedge = bool(((hedge or {}).get("policy_detail") or {}).get("wants_action"))
 
     # 退出活动触发 = 止盈资格 ∨ 风险主动退出。
-    # F1：风险退出用**配置/冻结预算价格上限**，且可越价吃单(within=ask≤cap)；
+    # F1：风险退出用**独立预算/价格上限**(风险退出授权 max_exit_spend)、且可越价吃单(within=ask≤cap)；
     #     止盈退出沿用 80% 缓冲、被动 maker(patient，恒 within)。
     risk_exit = exit_preferred                               # 风险驱动退出（区别于止盈资格退出）
     if risk_exit:
-        exit_detail = _risk_exit_budget_cap(snap, auth, quote_fn)
+        exit_budget, exit_cap, exit_within = _risk_exit_budget_cap(snap, auth, quote_fn)
     else:
-        exit_detail = {"remaining_budget": tp["remaining_budget"], "price_cap": tp["price_cap"],
-                       "within": True, "within_price": True, "quote_ok": tp["quote_ok"],
-                       "ask": None, "ask_depth": None, "depth_ok": True, "reason": None}
-    exit_budget = exit_detail.get("remaining_budget")
-    exit_cap = exit_detail.get("price_cap") or 0.0
-    exit_within = exit_detail.get("within") is True
+        exit_budget, exit_cap, exit_within = tp["remaining_budget"], tp["price_cap"], True
     exit_trigger = bool(tp["qualified"] or exit_preferred)
     exit_decision = exit_campaign_decision(authorized, exit_trigger, rem_short,
                                            exit_budget, tp["quote_ok"], exit_cap)
@@ -7906,7 +6086,7 @@ def manage_cycle(now_ms):
         "recovery_blocked": recovery.get("state") == "RECOVERY_BLOCKED",
         "orphan_hedge": (recovery.get("state") == "ORPHAN_HEDGE_EMERGENCY") or hedge["orphan"],
         "in_flight_order": in_flight["count"] > 0,
-        "exit_preferred": exit_preferred, "hedge_ready": bool(hedge_ready or policy_wants_hedge),   # 风险严重度→仲裁（接回 hedge_risk）
+        "exit_preferred": exit_preferred, "hedge_ready": hedge_ready,   # 风险严重度→仲裁（接回 hedge_risk）
         "take_profit_ready": tp["qualified"],
         "exit_authorized": authorized,
         "exit_executable": exit_executable,
@@ -7926,15 +6106,11 @@ def manage_cycle(now_ms):
             snap = _G(_POSITION_KEY)
             rem_short = (snap or {}).get("remaining_short_qty") or 0.0
     elif executable in ("HEDGE_READY", "ORPHAN_HEDGE_EMERGENCY") and hedge_exec:
-        if _hedge_policy_enabled_for(hedge):
-            hedge_step = _hedge_policy_submit(hedge, now_ms, allow_live=True)
-        else:
-            hedge_step = exec_hedge_step(hedge["venue_cfg"], hedge["side"], hedge["action"]["delta_contracts"],
-                                         h_reduce, allow_live=True, label="hedge",
-                                         execution_style=HEDGE_OPEN_EXECUTION_STYLE,
-                                         max_slippage_bps=HEDGE_MAX_SLIPPAGE_BPS)
-        if hedge_step and not hedge_step.get("dry") and snap \
-                and ((hedge_step.get("filled") or 0) > 0 or not _hedge_policy_enabled_for(hedge)):
+        hedge_step = exec_hedge_step(hedge["venue_cfg"], hedge["side"], hedge["action"]["delta_contracts"],
+                                     h_reduce, allow_live=True, label="hedge",
+                                     execution_style=HEDGE_OPEN_EXECUTION_STYLE,
+                                     max_slippage_bps=HEDGE_MAX_SLIPPAGE_BPS)
+        if hedge_step and not hedge_step.get("dry") and snap:
             _append_execution_history(snap, "hedge_execution_history", hedge_step, now_ms)
             _G(_POSITION_KEY, snap)
 
@@ -7958,20 +6134,12 @@ def manage_cycle(now_ms):
     if snap and rem_short <= 1e-12 and long_rem <= 1e-12 and abs(hedge.get("perp_qty") or 0.0) <= 1e-9:
         _archive_closed(snap, now_ms)
 
-    tp_display = _evaluate_take_profit(snap, quote_fn, now_ms) if snap else tp
-    position_detail = _build_position_detail(snap, quote_fn, now_ms, long_state or exit_state, in_flight, hedge)
-    hedge_detail = _build_hedge_detail(hedge, risk)
-    risk_exit_detail = _build_risk_exit_detail(risk_exit, exit_detail)
-    ledger_detail = _build_ledger_detail(snap, rec, recovery, in_flight, tp_display)
     return {"arb": arb, "entry_snapshot": snap, "reconcile": rec, "executable": executable,
-            "auth": auth, "authorized": authorized,
-            "risk_exit": risk_exit, "exit_executable": exit_executable,
+            "auth": auth, "authorized": authorized, "tp_auth_code": tp_code,
+            "risk_exit_auth_code": risk_code, "risk_exit": risk_exit, "exit_executable": exit_executable,
             "exit_campaign_state": (long_state or exit_state), "tp_ratio": tp["ratio"], "hedge": hedge,
             "hedge_step": hedge_step, "risk_state": risk_state, "risk": risk,
-            "manage_in_flight_order": in_flight,
-            "position_detail": position_detail, "take_profit_detail": tp_display,
-            "risk_exit_detail": risk_exit_detail, "hedge_detail": hedge_detail,
-            "ledger_detail": ledger_detail}
+            "manage_in_flight_order": in_flight}
 
 
 def run_cycle(now_ms=None):
@@ -7998,15 +6166,9 @@ def run_cycle(now_ms=None):
         locked = None
 
     pending = []
-    stable_menu, stable_meta = _load_stable_menu(manual_context)
-    display_candidates = list(stable_menu or [])
-    not_lockable_reason = stable_meta.get("not_lockable_reason")
+    display_candidates = []
+    not_lockable_reason = None
     plan_vrp_blocked = 0
-    plan_vrp_blocked = stable_meta.get("vrp_blocked") or 0
-    plan_build_reason = stable_meta.get("reason")
-    enum_diag = stable_meta.get("diag")
-    menu_source = "frozen" if display_candidates else "none"
-    plan_build_attempted = False
     commit_result = None
     manage_result = None
     recovery = _recovery_verdict()
@@ -8033,13 +6195,12 @@ def run_cycle(now_ms=None):
         phase = "PLAN_MENU_READY"
         lib = _G(_LIB_KEY)
         if _lineage_invalidated(lib, manual_context, now_ms):
-            _clear_plan_lineage(clear_menu=False)
+            _clear_plan_lineage()
             lib = None
-        if spot and not display_candidates:
-            plan_build_attempted = True
+        last_build = int(_G(_LIB_BUILD_TS_KEY) or 0)
+        if spot and (not lib or now_ms - last_build >= PLAN_REFRESH_SECONDS * 1000):
             menu, _pm_ok, _model, reason, diag = _build_menu(now_ms, spot, manual_context)
-            plan_build_reason = reason
-            enum_diag = diag
+            display_candidates = list(menu or [])
             market_context = (manual_context or {}).get("market_context")
             lockable = []
             if reason == "OK" and menu and market_context:
@@ -8058,50 +6219,17 @@ def run_cycle(now_ms=None):
                 _G(_LIB_KEY, lib)
                 _G(_LIB_BUILD_TS_KEY, now_ms)
             else:
-                _clear_plan_lineage(clear_menu=False)
+                _clear_plan_lineage()
                 lib = None
                 if reason != "OK" and not not_lockable_reason:
                     not_lockable_reason = reason
-            pending_tmp = []
-            if lib and lib.get("recommendations"):
-                pending_tmp = [{"id": s["plan_id"], "summary": s["summary"],
-                                "confirm_code": s["confirm_code"]}
-                               for s in lib["recommendations"][:MENU_SIZE]]
-            display_candidates = _annotate_menu_lock_state(menu or [], pending_tmp, not_lockable_reason)
-            stable_meta = _store_stable_menu(display_candidates, manual_context, now_ms,
-                                             reason, diag, len(pending_tmp or []),
-                                             plan_vrp_blocked, not_lockable_reason)
-            _store_plan_trace(now_ms, reason=reason, diag=diag, menu_count=len(menu or []),
-                              lockable_count=len(pending_tmp or []),
-                              vrp_blocked=plan_vrp_blocked,
-                              not_lockable_reason=not_lockable_reason)
-            menu_source = "built_frozen"
-        elif display_candidates:
-            _store_plan_trace(now_ms, reason=plan_build_reason, diag=enum_diag,
-                              menu_count=len(display_candidates),
-                              lockable_count=stable_meta.get("lockable_count") or 0,
-                              vrp_blocked=plan_vrp_blocked,
-                              not_lockable_reason=not_lockable_reason)
         if lib and lib.get("recommendations"):
             pending = [{"id": s["plan_id"], "summary": s["summary"],
                         "confirm_code": s["confirm_code"]}
                        for s in lib["recommendations"][:MENU_SIZE]]
-            display_candidates = _annotate_menu_lock_state(display_candidates, pending, not_lockable_reason)
-            _G(_MENU_KEY, list(display_candidates or []))
             phase = "HARD_APPROVAL_WAIT"
-    if display_candidates and not pending and not_lockable_reason:
-        display_candidates = _annotate_menu_lock_state(display_candidates, pending, not_lockable_reason)
-        _G(_MENU_KEY, list(display_candidates or []))
-    locked_display = None
-    if locked and phase == "PLAN_LOCKED":
-        locked_display = _locked_display_candidate(locked, display_candidates)
-        if locked_display:
-            display_candidates = [locked_display]
-            menu_source = "locked"
-            not_lockable_reason = None
 
     ctx = _ctx_base(state, spot, "RUN_CYCLE:" + phase)
-    ctx["now_ms"] = now_ms
     _apply_manual_context_to_ctx(ctx, manual_context, manual_check)
     ctx["console_phase"] = phase
     if phase == "WAIT_MANUAL_AUDIT_GATE":
@@ -8109,25 +6237,10 @@ def run_cycle(now_ms=None):
     ctx["gate_summary"] = gsum
     ctx["lineage_invalidation"] = lineage_invalidation
     ctx["pending_candidates"] = pending
-    ctx["menu"] = display_candidates
-    ctx["menu_source"] = menu_source
-    ctx["plan_library_frozen"] = bool(display_candidates)
-    detail_plan = locked_display or (display_candidates[0] if display_candidates else None)
-    if detail_plan:
-        try:
-            ctx.update(_flat_plan_fields(detail_plan))
-            ctx["preview_plan_detail"] = "locked_plan" if locked_display else "stable_first_candidate"
-            ctx["selected_plan"] = detail_plan.get("id")
-        except Exception:
-            ctx["preview_plan_detail"] = None
     ctx["display_candidates_count"] = len(display_candidates)
-    ctx["lockable_candidates_count"] = 1 if locked_display else len(pending)
-    plan_trace = _G(_PLAN_TRACE_KEY) or {}
-    ctx["not_lockable_reason"] = not_lockable_reason or plan_trace.get("not_lockable_reason")
-    ctx["plan_vrp_blocked"] = plan_vrp_blocked or plan_trace.get("vrp_blocked") or 0
-    ctx["plan_build_reason"] = plan_build_reason or plan_trace.get("reason")
-    ctx["enum_diag"] = enum_diag or plan_trace.get("diag")
-    ctx["plan_build_attempted"] = plan_build_attempted
+    ctx["lockable_candidates_count"] = len(pending)
+    ctx["not_lockable_reason"] = not_lockable_reason
+    ctx["plan_vrp_blocked"] = plan_vrp_blocked
     ctx["kill_new_risk"] = kill
     ctx["last_command"] = disp.get("action")
     ctx["last_command_outcome"] = disp.get("outcome")
@@ -8138,14 +6251,6 @@ def run_cycle(now_ms=None):
         ctx["projected_budget"] = commit_result.get("budget")
         ctx["entry_state"] = commit_result.get("entry_state")
         ctx["entry_net_credit"] = commit_result.get("net_credit")
-        po = commit_result.get("entry_prot_order")
-        if po:
-            po = dict(po)
-            ws = po.get("wait_start_ms")
-            if isinstance(ws, (int, float)):
-                po["wait_elapsed_ms"] = max(0, now_ms - ws)
-                po["taker_due"] = po["wait_elapsed_ms"] >= ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
-        ctx["entry_prot_order"] = po
         if commit_result.get("entry_snapshot"):
             ctx["entry_snapshot"] = commit_result["entry_snapshot"]
     if manage_result:
@@ -8155,21 +6260,10 @@ def run_cycle(now_ms=None):
         ctx["risk_state"] = manage_result.get("risk_state")
         ctx["risk_pkg"] = manage_result.get("risk")
         ctx["manage_in_flight_order"] = manage_result.get("manage_in_flight_order")
+        ctx["risk_exit_auth_code"] = manage_result.get("risk_exit_auth_code")
         ctx["exit_campaign_state"] = manage_result.get("exit_campaign_state")
         _r = manage_result.get("tp_ratio")
         ctx["take_profit_ratio"] = ("%.1f%%" % (_r * 100)) if isinstance(_r, (int, float)) else "DATA_GAP"
-        ctx["position_detail"] = manage_result.get("position_detail")
-        ctx["take_profit_detail"] = manage_result.get("take_profit_detail")
-        ctx["risk_exit_detail"] = manage_result.get("risk_exit_detail")
-        ctx["hedge_detail"] = manage_result.get("hedge_detail")
-        ctx["ledger_detail"] = manage_result.get("ledger_detail")
-        ctx["hedge_step"] = manage_result.get("hedge_step")
-        pd = ctx.get("position_detail") or {}
-        if pd:
-            ctx["short_instrument"] = pd.get("short_instrument")
-            ctx["protection_instrument"] = pd.get("long_instrument")
-            ctx["short_mark"] = pd.get("short_mark")
-            ctx["protection_mark"] = pd.get("long_mark")
         _h = manage_result.get("hedge")
         if _h:
             if _h.get("data_gap"):
@@ -8191,33 +6285,30 @@ def run_cycle(now_ms=None):
         ctx["recovery_state"] = recovery.get("state")
     if locked and not (commit_result and commit_result.get("committed")):
         ctx["locked_plan_summary"] = "%s %s" % (locked.get("confirm_code"), locked.get("summary"))
-        if not ctx.get("preview_plan_detail"):
-            ctx["preview_plan_detail"] = "locked_plan"
-            ctx["selected_id"] = locked.get("plan_id")
-            ctx["selected_plan"] = locked.get("plan_id")
-            ctx["short_instrument"] = locked.get("short_instrument")
-            ctx["protection_instrument"] = locked.get("long_instrument")
-            ctx["short_strike"] = locked.get("short_strike")
-            ctx["protection_strike"] = locked.get("long_strike")
-            ctx["short_delta"] = locked.get("short_delta")
-            ctx["amount"] = locked.get("amount")
-            ctx["net_credit"] = locked.get("entry_net_credit_after_costs")
-            ctx["margin_relief_ratio"] = locked.get("margin_relief_ratio")
-            ctx["execution_feasibility_grade"] = locked.get("execution_feasibility_grade")
-            ctx["execution_feasibility_score"] = locked.get("execution_feasibility_score")
-            ctx["execution_feasibility_score_norm"] = locked.get("execution_feasibility_score_norm")
-            ctx["execution_feasibility_warnings"] = locked.get("execution_feasibility_warnings") or []
-        if not ctx.get("menu"):
-            ctx["menu"] = [{
-                "id": locked.get("plan_id"),
-                "short_instrument": locked.get("short_instrument"),
-                "protection_instrument": locked.get("long_instrument"),
-                "short_strike": locked.get("short_strike"),
-                "protection_strike": locked.get("long_strike"),
-                "amount": locked.get("amount"),
-                "net_credit_effective": locked.get("entry_net_credit_after_costs"),
-                "margin_relief_ratio": locked.get("margin_relief_ratio"),
-            }]
+        ctx["preview_plan_detail"] = "locked_plan"
+        ctx["selected_id"] = locked.get("plan_id")
+        ctx["short_instrument"] = locked.get("short_instrument")
+        ctx["protection_instrument"] = locked.get("long_instrument")
+        ctx["short_strike"] = locked.get("short_strike")
+        ctx["protection_strike"] = locked.get("long_strike")
+        ctx["short_delta"] = locked.get("short_delta")
+        ctx["amount"] = locked.get("amount")
+        ctx["net_credit"] = locked.get("entry_net_credit_after_costs")
+        ctx["margin_relief_ratio"] = locked.get("margin_relief_ratio")
+        ctx["execution_feasibility_grade"] = locked.get("execution_feasibility_grade")
+        ctx["execution_feasibility_score"] = locked.get("execution_feasibility_score")
+        ctx["execution_feasibility_score_norm"] = locked.get("execution_feasibility_score_norm")
+        ctx["execution_feasibility_warnings"] = locked.get("execution_feasibility_warnings") or []
+        ctx["menu"] = [{
+            "id": locked.get("plan_id"),
+            "short_instrument": locked.get("short_instrument"),
+            "protection_instrument": locked.get("long_instrument"),
+            "short_strike": locked.get("short_strike"),
+            "protection_strike": locked.get("long_strike"),
+            "amount": locked.get("amount"),
+            "net_credit_effective": locked.get("entry_net_credit_after_costs"),
+            "margin_relief_ratio": locked.get("margin_relief_ratio"),
+        }]
     _emit(ctx, "manual-gate")
     return ctx
 
@@ -8233,8 +6324,6 @@ def main():
         "PROFILE=%s" % _g["profile"],
         "ALLOW_ENTRY=%s" % _g["allow_entry"],
         "currency=%s" % SETTLEMENT_CURRENCY)
-    self_check = _startup_self_check(SETTLEMENT_CURRENCY)
-    Log("[self-check]", disp_self_check_line(self_check))
     startup_recovery_check(SETTLEMENT_CURRENCY)        # 启动恢复：可解释映射 → OK/RECOVERY_BLOCKED/ORPHAN
 
     while True:

@@ -15,8 +15,9 @@ _ORIG_ST = {k: getattr(ST, k, _MISSING) for k in (
     "RUN_PROFILE", "ALLOW_ENTRY_TRADING", "ALLOW_EXIT_TRADING", "ALLOW_HEDGE_TRADING",
     "KILL_NEW_RISK", "EMERGENCY_REDUCE_ONLY", "HEDGE_VENUE", "HEDGE_BINANCE_INSTRUMENT",
     "HEDGE_BINANCE_EXCHANGE_INDEX", "HEDGE_REDUCTION_RATIO", "HEDGE_MAX_SLIPPAGE_BPS",
+    "HEDGE_POLICY_V313_ENABLED",
     "dbt_get_positions", "dbt_get_open_orders", "dbt_get_instrument", "exec_hedge_step",
-    "bnc_get_position_btc", "exec_quote", "_spot_price", "_evaluate_hedge",
+    "bnc_get_position_btc", "bnc_get_position_snapshot", "exec_quote", "_spot_price", "_evaluate_hedge",
     "_evaluate_position_risk_now", "_evaluate_take_profit",
 )}
 
@@ -38,10 +39,15 @@ def _restore():
 class _FakeBinance:
     def __init__(self):
         self.contract = None
+        self.io_calls = []
         self.direction = None
         self.cancelled = []
         self.orders_seen = 0
         self.ticker = {"Buy": 59990.0, "Sell": 60000.0}
+
+    def IO(self, *args):
+        self.io_calls.append(args)
+        return True
 
     def SetContractType(self, symbol):
         self.contract = symbol
@@ -77,7 +83,8 @@ def test_binance_prompt_limit_buy_confirms_cancels_and_rechecks():
     B.Sleep = lambda _ms: None
     r = B.bnc_place_hedge("BTCUSDC", "buy", 0.10, reduce_only=False, allow_live=True,
                           execution_style="PROMPT_LIMIT", max_slippage_bps=5)
-    assert fake.contract == "BTCUSDC" and fake.direction == "buy"
+    assert fake.io_calls == [("currency", "BTC_USDC")]
+    assert fake.contract == "swap" and fake.direction == "buy"
     assert abs(fake.last_order[1] - 60030.0) < 1e-9
     assert r["post_only"] is False and r["execution_style"] == "PROMPT_LIMIT"
     assert abs(r["filled"] - 0.05) < 1e-12 and abs(r["remaining"] - 0.05) < 1e-12
@@ -92,7 +99,7 @@ def test_binance_prompt_limit_sell_reduce_uses_closebuy_direction():
     r = B.bnc_place_hedge("BTCUSDC", "sell", 0.10, reduce_only=True, allow_live=True,
                           execution_style="PROMPT_LIMIT", max_slippage_bps=5)
     assert fake.direction == "closebuy"
-    assert abs(fake.last_order[1] - 59960.005) < 1e-9
+    assert abs(fake.last_order[1] - 59960.0) < 1e-9
     assert r["reduce_only"] is True and r["post_only"] is False
     _restore()
 
@@ -122,8 +129,11 @@ def test_price_line_rechecks_but_does_not_open_without_probability_confirmation(
 
 def test_strategy_hedge_target_uses_binance_actual_leg_quantities():
     ST.HEDGE_VENUE = "BINANCE"
+    ST.HEDGE_POLICY_V313_ENABLED = False
     ST.HEDGE_REDUCTION_RATIO = 0.5
     ST.bnc_get_position_btc = lambda _symbol: 0.0
+    ST.bnc_get_position_snapshot = lambda _symbol: {
+        "qty": 0.0, "unrealized_pnl_usd": None}
     snap = {"side": "CALL", "remaining_short_qty": 0.05, "long_remaining_qty": 0.10,
             "short_instrument": "S", "long_instrument": "P"}
     q = {"S": {"delta": 0.35}, "P": {"delta": 0.10}}
@@ -136,6 +146,25 @@ def test_strategy_hedge_target_uses_binance_actual_leg_quantities():
     _restore()
 
 
+def test_strategy_hedge_snapshot_carries_binance_unrealized_pnl_to_display():
+    ST.HEDGE_VENUE = "BINANCE"
+    ST.HEDGE_REDUCTION_RATIO = 0.5
+    ST.bnc_get_position_snapshot = lambda _symbol: {
+        "qty": -0.002, "unrealized_pnl_usd": 1.75}
+    snap = {"side": "PUT", "remaining_short_qty": 0.05, "long_remaining_qty": 0.05,
+            "short_instrument": "S", "long_instrument": "P"}
+    q = {"S": {"delta": -0.35}, "P": {"delta": -0.10}}
+
+    h = ST._evaluate_hedge(snap, lambda inst: q.get(inst, {}))
+    detail = ST._build_hedge_detail(h, {"current_risk": {}, "reason_codes": []})
+
+    assert h["perp_qty"] == -0.002
+    assert h["unrealized_pnl_usd"] == 1.75
+    assert detail["hedge_unrealized_pnl_usd"] == 1.75
+    assert detail["hedge_pnl_state"] == "OK"
+    _restore()
+
+
 def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized():
     ST.RUN_PROFILE = "LIVE"
     ST.ALLOW_ENTRY_TRADING = False
@@ -143,6 +172,7 @@ def test_manage_cycle_falls_back_to_binance_hedge_when_risk_exit_not_authorized(
     ST.ALLOW_HEDGE_TRADING = True
     ST.KILL_NEW_RISK = False
     ST.EMERGENCY_REDUCE_ONLY = False
+    ST.HEDGE_POLICY_V313_ENABLED = False
     ST.HEDGE_VENUE = "BINANCE"
     ST.HEDGE_REDUCTION_RATIO = 0.5
     now = 1000000
@@ -188,6 +218,7 @@ def test_manage_cycle_allows_existing_hedge_reduce_when_hedge_gate_off():
     ST.ALLOW_HEDGE_TRADING = False
     ST.KILL_NEW_RISK = False
     ST.EMERGENCY_REDUCE_ONLY = False
+    ST.HEDGE_POLICY_V313_ENABLED = False
     fmz_shim._G(ST._POSITION_KEY, {
         "position_id": "pos-reduce", "side": "CALL", "short_instrument": "S",
         "long_instrument": "P", "remaining_short_qty": 0.10, "long_remaining_qty": 0.10,

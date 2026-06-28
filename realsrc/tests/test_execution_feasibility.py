@@ -61,6 +61,13 @@ def test_low_premium_protection_wide_relative_spread_is_softened():
     assert r["liquidity"]["protection_abs_spread"] <= EF.PROTECTION_ABS_SPREAD_MAX + 1e-12
 
 
+def test_near_expiry_low_premium_protection_two_tick_spread_is_softened():
+    cheap_two_tick = _q(0.00020, 0.00010, 0.00030)
+    r = EF.evaluate_execution_feasibility(_inp(_GOOD_SHORT, cheap_two_tick))
+    assert r["hard_gate_passed"]
+    assert "PROTECTION_SPREAD_SOFT_LOW_PREMIUM" in r["warnings"]
+
+
 def test_expensive_protection_wide_spread_still_rejects():
     expensive_wide = _q(0.004, 0.001, 0.004)
     r = EF.evaluate_execution_feasibility(_inp(_GOOD_SHORT, expensive_wide))

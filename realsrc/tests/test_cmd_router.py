@@ -17,9 +17,6 @@ def test_parse_basic_and_aliases():
     assert c["type"] == "EXECUTE" and c["arg"] == "A4F2" and c["name"] == "执行"
     bare = CR.parse_command("A4F2")
     assert bare["type"] == "EXECUTE" and bare["arg"] == "A4F2"
-    assert CR.parse_command("拒绝")["type"] == "REJECT"
-    assert CR.parse_command("EXIT_AUTHORIZE:9C1E")["type"] == "EXIT_AUTHORIZE"
-    assert CR.parse_command("授权止盈:Z9")["arg"] == "Z9"
     assert CR.parse_command("") is None and CR.parse_command(None) is None
     assert CR.parse_command("   ") is None
     assert CR.parse_command("乱七八糟:x")["type"] == "UNKNOWN"
@@ -27,9 +24,9 @@ def test_parse_basic_and_aliases():
 
 def test_is_consume():
     assert CR.is_consume(CR.parse_command("执行:A4F2"))
-    assert CR.is_consume(CR.parse_command("风险退出授权:Q1"))
-    assert not CR.is_consume(CR.parse_command("急停"))
-    assert not CR.is_consume(CR.parse_command("拒绝"))
+    for raw in ("授权止盈:Z9", "风险退出授权:Q1", "拒绝", "急停", "恢复", "撤销授权"):
+        assert CR.parse_command(raw)["type"] == "UNKNOWN"
+        assert not CR.is_consume(CR.parse_command(raw))
 
 
 def test_idempotency_key_structured():
@@ -55,13 +52,12 @@ def test_new_refresh_seq_revives_same_code():
     assert CR.route_command("执行:A4F2", ctx2, 1003)["status"] == "ACCEPTED"
 
 
-def test_toggle_commands_not_deduped():
+def test_non_execute_commands_are_not_accepted():
     _clear()
-    a = CR.route_command("急停", CTX, 1000)
-    CR.cmd_ledger_record(a["command"], a["key"], "ACCEPTED", "killed", 1000)
-    b = CR.route_command("急停", CTX, 1001)
-    assert a["status"] == "ACCEPTED" and b["status"] == "ACCEPTED"   # 切换型可重复
-    assert a["key"] is None
+    for raw in ("拒绝", "授权止盈:Z9", "风险退出授权:Q1", "急停", "恢复", "撤销授权"):
+        r = CR.route_command(raw, CTX, 1000)
+        assert r["status"] == "UNKNOWN"
+        assert r["key"] is None
 
 
 def test_empty_and_unknown():
@@ -73,5 +69,5 @@ def test_empty_and_unknown():
 def test_cmd_ledger_persists_and_caps():
     _clear()
     for i in range(CR._CMD_LEDGER_MAX + 10):
-        CR.cmd_ledger_record(CR.parse_command("急停"), None, "ACCEPTED", "x", i)
+        CR.cmd_ledger_record(CR.parse_command("执行:A4F2"), None, "ACCEPTED", "x", i)
     assert len(CR.cmd_ledger_load()) == CR._CMD_LEDGER_MAX        # 截断到上限

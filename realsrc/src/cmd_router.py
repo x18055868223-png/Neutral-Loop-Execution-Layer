@@ -1,31 +1,22 @@
 # -*- coding: utf-8 -*-
-"""交互命令路由 + 命令账本 + 幂等（cmd_*）。
+"""确认码命令路由 + 命令账本 + 幂等（cmd_*）。
 
 把 FMZ `GetCommand()` 返回的 "名:参数" 解析、归一、去重并落审计账本。
-解决补充意见 P0-2：
-  - 幂等键 = robot_id + session_id + refresh_seq + command_type + nonce（**非**原始命令串哈希）；
-  - 「消费型」命令（执行/授权）一次性消费：同键已在历史账本则忽略
-    （防跨轮/重启重复下单、防延迟旧命令命中新方案）；
-  - 「切换型」命令（拒绝/撤销/急停/恢复）不去重（幂等动作可重复应用），但仍全部入账本审计。
+唯一运行时交互入口是计划确认码：
+  - `执行:<确认码>` / `EXECUTE:<确认码>`
+  - 裸确认码（3-12 位字母数字）
 
 注：FMZ `GetCommand()` 在回测系统不生效，须真实机器人空跑验收。
-按钮名↔命令类型见 COMMAND_ALIASES（中文按钮名与英文类型双向）。
 """
 from fmz_shim import _G
 
 # 中文按钮名 / 英文类型 → 规范类型
 COMMAND_ALIASES = {
     "执行": "EXECUTE", "EXECUTE": "EXECUTE",
-    "拒绝": "REJECT", "REJECT": "REJECT",
-    "授权止盈": "EXIT_AUTHORIZE", "EXIT_AUTHORIZE": "EXIT_AUTHORIZE",
-    "撤销授权": "EXIT_REVOKE", "EXIT_REVOKE": "EXIT_REVOKE",
-    "风险退出授权": "RISK_EXIT_AUTHORIZE", "RISK_EXIT_AUTHORIZE": "RISK_EXIT_AUTHORIZE",
-    "急停": "KILL", "KILL": "KILL",
-    "恢复": "RESUME", "RESUME": "RESUME",
 }
 
-# 一次性消费型（触发下单 / 授权等不可重复后果）→ 严格幂等
-CONSUME_TYPES = frozenset({"EXECUTE", "EXIT_AUTHORIZE", "RISK_EXIT_AUTHORIZE"})
+# 一次性消费型（触发方案锁定，不可重复）→ 严格幂等
+CONSUME_TYPES = frozenset({"EXECUTE"})
 
 _CMD_LEDGER_KEY = "spm_cmd_ledger_v1"
 _CMD_LEDGER_MAX = 200
@@ -62,7 +53,7 @@ def idempotency_key(robot_id, session_id, refresh_seq, command_type, nonce):
 
 
 def _nonce_for(command):
-    # 消费型用 arg（确认码/授权码）作 nonce → 一次性消费、码变即新命令
+    # 消费型用 arg（确认码）作 nonce → 一次性消费、码变即新命令
     return command.get("arg") or command.get("type")
 
 

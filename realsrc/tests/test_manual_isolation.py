@@ -40,6 +40,13 @@ def test_bundle_order_excludes_external_receiver():
     assert '"manual_context"' in src
 
 
+def test_bundle_excludes_runtime_authorization_module():
+    with open(os.path.join(ROOT, "build_bundle.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"authorization"' not in src
+    assert "authorize_from_code" not in src
+
+
 def test_manual_gate_isolation_contract_constant():
     sys.path.insert(0, SRC)
     import strategy as ST

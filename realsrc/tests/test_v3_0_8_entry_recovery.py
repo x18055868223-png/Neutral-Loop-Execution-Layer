@@ -93,7 +93,7 @@ def test_abandoned_partial_short_freezes_vertical_not_protection_residual():
         _restore()
 
 
-def test_abandoned_protection_only_does_not_auto_unwind():
+def test_protection_only_progress_keeps_locked_campaign():
     calls = []
     try:
         _prime_attempt(True)
@@ -102,15 +102,63 @@ def test_abandoned_protection_only_does_not_auto_unwind():
         fmz_shim._G(ST._LOCKED_KEY, locked)
 
         out = ST._attempt_commit(locked, 60000.0, {"market_context": {}}, 123457)
-        snap = fmz_shim._G(ST._POSITION_KEY)
+        kept = fmz_shim._G(ST._LOCKED_KEY)
 
-        assert out["entry_snapshot"] is snap
-        assert out.get("residual_position") is True
-        assert snap["remaining_short_qty"] == 0.0
-        assert snap["long_remaining_qty"] == 0.1
-        assert snap["residual_reason"] == "PROTECTION_ONLY_AFTER_ENTRY_ABANDON"
-        assert ST.ledger_get_state() == ST.S_SHORT_FLAT_LONG_RESIDUAL
+        assert out["entry_snapshot"] is None
+        assert kept is not None
+        assert kept["entry"]["prot_done"] == 0.1
+        assert kept["entry"]["short_done"] == 0.0
+        assert ST.ledger_get_state() == ST.S_NO_POSITION
         assert calls == []
+    finally:
+        _restore()
+
+
+def test_no_fill_attempt_cap_keeps_locked_plan_in_entry_campaign():
+    try:
+        _prime_attempt(True)
+        locked = _locked(0.0, 0.0, attempts=20)
+        fmz_shim._G(ST._LOCKED_KEY, locked)
+
+        out = ST._attempt_commit(locked, 60000.0, {"market_context": {}}, 123456)
+        kept = fmz_shim._G(ST._LOCKED_KEY)
+
+        assert out["entry_snapshot"] is None
+        assert out["entry_state"] == ST.ENTRY_WORKING
+        assert out["reason"].startswith("ENTRY_WORKING")
+        assert kept is not None
+        assert kept["entry"]["attempts"] == 21
+        assert fmz_shim._G(ST._POSITION_KEY) is None
+        assert ST.ledger_get_state() == ST.S_NO_POSITION
+    finally:
+        _restore()
+
+
+def test_attempt_commit_persists_protection_order_state_on_locked_plan():
+    try:
+        _prime_attempt(True)
+        ST.exec_entry_campaign_step = lambda *_a, **_k: {
+            "quotes_ok": True, "credit_ok": True, "dry": False,
+            "prot_price": 0.0002, "short_price": 0.0068,
+            "net_credit": 0.0006, "prot_fill": 0.0, "short_fill": 0.0,
+            "prot_order": {
+                "order_id": "p1", "instrument": "BTC-29JUN26-57500-C",
+                "price": 0.0002, "amount": 0.1, "filled_seen": 0.0,
+                "placed_ms": 123456, "wait_start_ms": 123456,
+                "label": "entry_prot",
+            },
+            "reason": "ENTRY_STEP",
+        }
+        locked = _locked(0.0, 0.0, attempts=0)
+        fmz_shim._G(ST._LOCKED_KEY, locked)
+
+        out = ST._attempt_commit(locked, 60000.0, {"market_context": {}}, 123456)
+        kept = fmz_shim._G(ST._LOCKED_KEY)
+
+        assert out["entry_state"] == ST.ENTRY_WORKING
+        assert kept["entry"]["prot_order"]["order_id"] == "p1"
+        assert kept["entry"]["prot_order"]["wait_start_ms"] == 123456
+        assert fmz_shim._G(ST._POSITION_KEY) is None
     finally:
         _restore()
 
@@ -180,7 +228,7 @@ def test_precommit_failure_after_protection_only_freezes_residual_snapshot():
         _restore()
 
 
-def test_live_protection_fill_without_short_fill_adopts_residual_immediately():
+def test_live_protection_fill_without_short_fill_keeps_locked_campaign():
     try:
         _prime_attempt(True)
         ST.exec_entry_campaign_step = lambda *_a, **_k: {
@@ -193,15 +241,15 @@ def test_live_protection_fill_without_short_fill_adopts_residual_immediately():
         fmz_shim._G(ST._LOCKED_KEY, locked)
 
         out = ST._attempt_commit(locked, 60000.0, {"market_context": {}}, 123461)
-        snap = fmz_shim._G(ST._POSITION_KEY)
+        kept = fmz_shim._G(ST._LOCKED_KEY)
 
-        assert out["entry_snapshot"] is snap
-        assert out.get("residual_position") is True
-        assert out["reason"] == "ENTRY_PROTECTION_ONLY_RESIDUAL_MANAGED:SHORT_NOT_FILLED_AFTER_PROTECTION"
-        assert snap["remaining_short_qty"] == 0.0
-        assert snap["long_remaining_qty"] == 0.1
-        assert ST.ledger_get_state() == ST.S_SHORT_FLAT_LONG_RESIDUAL
-        assert fmz_shim._G(ST._LOCKED_KEY) is None
+        assert out["entry_snapshot"] is None
+        assert out["reason"].startswith("ENTRY_WORKING")
+        assert kept is not None
+        assert kept["entry"]["prot_done"] == 0.1
+        assert kept["entry"]["short_done"] == 0.0
+        assert ST.ledger_get_state() == ST.S_NO_POSITION
+        assert fmz_shim._G(ST._POSITION_KEY) is None
     finally:
         _restore()
 

@@ -1,70 +1,72 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.0.13-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.0.17-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
 # -*- coding: utf-8 -*-
-"""FMZ startup config for the manual-gate execution bundle.
+"""
+Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
-Trader edits should normally stay in the first two blocks: live identity/risk
-and the current manual directional view. Runtime safety gates remain explicit.
+本版本只接受执行层本地人工审计配置：方向、数量、delta 范围、腿宽、
+风险退出预算和分动作授权门控均来自这些 UPPER_CASE 参数。信号层不参与
+执行主链路。交易员通常只需要看本文件顶部几个配置块。
 """
 
-# ===== Instance / version =====
-ROBOT_ID = "spm-exec-1"
-STRATEGY_VERSION = "3.0.13-manual-gate"
-RUN_PROFILE = "LIVE"              # TEST=force dry-run gates off; LIVE=use ALLOW_* gates
+# ===== 当前版本 / 实例标识 =====
+ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
+STRATEGY_VERSION = "3.0.17-manual-gate"
+RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
-# ===== VRP_CONTEXT data source; validity-only, not a price gate =====
+# ===== VRP_CONTEXT 数据源（只检查上下文有效性，不做旧价格门控）=====
 GEX_CONTEXT_API_BASE = "http://13.231.16.198:8000"
 GEX_CONTEXT_API_KEY = "7WkM4LBAha7di0KMCtgty3NwdQcNXI5-j3o8MymkGiE"
 GEX_CONTEXT_TIMEOUT_SECONDS = 5
 
-# ===== Core trader inputs =====
-SETTLEMENT_CURRENCY = "BTC"
-MANUAL_PLANNING_ALLOWED = True
-DIRECTION_BIAS = "SHORT_PUT"      # SHORT_CALL | SHORT_PUT
-ORDER_AMOUNT = 0.1
-SHORT_DELTA_RANGE = (0.15, 0.45)
-PROTECTION_WIDTH_RANGE = (2000, 2500)
-RISK_EXIT_MAX_SPEND = 0.001
+# ===== 交易员核心输入（当前小额实盘测试面）=====
+SETTLEMENT_CURRENCY = "BTC"        # 结算币；当前主流程为 BTC
+MANUAL_PLANNING_ALLOWED = True     # True=允许按本地人工视图生成候选；False=只管持仓/退出/恢复
+DIRECTION_BIAS = "SHORT_PUT"      # SHORT_CALL=偏空卖 Call；SHORT_PUT=偏多卖 Put
+ORDER_AMOUNT = 0.1                 # 单结构数量（Deribit BTC 期权常用最小步长 0.1）
+SHORT_DELTA_RANGE = (0.15, 0.45)   # 短腿 |delta| 接受范围
+PROTECTION_WIDTH_RANGE = (2000, 2500)  # 保护腿腿宽范围(USD)，以短腿行权价为基准
+RISK_EXIT_MAX_SPEND = 0.001        # 风险退出最大支出(BTC)；风险触发时的独立成本上限
 
-# ===== Expiry and ranking defaults =====
-TARGET_DTE_HOURS = 24
-MENU_SIZE = 10
+# ===== 到期 / 排序默认值 =====
+TARGET_DTE_HOURS = 24              # 候选围绕 24h 到期；再取之后一个更晚到期作为备选
+MENU_SIZE = 10                     # 状态栏最多展示候选条数
 PLAN_WEIGHTS = {"win_rate": 0.35, "rr": 0.25, "efficiency": 0.40, "manual": 0.0}
-UNDERLYING_REF_PRICE = None
+UNDERLYING_REF_PRICE = None        # None=走实时 index；仅测试/演练时可固定参考价
 
-# ===== Candidate quality / execution guards =====
-MIN_MARGIN_RELIEF_RATIO = 0.0      # soft display floor only; portfolio budget stays hard
-THIN_SHORT_PREMIUM_WARN = 0.0005
-DEEP_OTM_MAX_DELTA = 0.05
-MAX_SPREAD_RATIO = 0.60
-PROTECTION_LOW_PREMIUM_MAX = 0.0006
-PROTECTION_ABS_SPREAD_MAX = 0.00015
+# ===== 候选质量 / 执行安全门 =====
+MIN_MARGIN_RELIEF_RATIO = 0.0      # 软展示底线；组合预算仍是硬门
+THIN_SHORT_PREMIUM_WARN = 0.0005   # 短腿权利金过薄提示线；不再硬挡 24h 候选
+DEEP_OTM_MAX_DELTA = 0.05          # 保护腿过度虚值提示/筛选参考
+MAX_SPREAD_RATIO = 0.60            # 相对价差上限；真实执行前仍 fail-closed
+PROTECTION_LOW_PREMIUM_MAX = 0.0006     # 低价保护腿可用绝对价差门替代相对价差门
+PROTECTION_ABS_SPREAD_MAX = 0.00015     # 保护腿绝对 bid-ask 宽度上限
 
-# ===== Entry execution =====
-MAX_CHASE_STEPS = 1
-CHASE_WAIT_SECONDS = 8
-ENTRY_MIN_NET_CREDIT = 0.0
-ENTRY_MAX_TICK_STEPS = 3
-ENTRY_MAX_ATTEMPTS = 20
+# ===== 入场执行参数 =====
+MAX_CHASE_STEPS = 1                # 单次下单计划价最多追价步数
+CHASE_WAIT_SECONDS = 8             # 挂单后判定未成交的等待秒数
+ENTRY_MIN_NET_CREDIT = 0.0         # 入场净 credit 下限；0=至少非负
+ENTRY_MAX_TICK_STEPS = 3           # 开仓活动在信用底线内最多逐 tick 改价档数
+ENTRY_MAX_ATTEMPTS = 20            # 开仓活动最大尝试轮数；超限未成交则放弃/恢复
 
-# ===== Runtime authorization gates =====
-ALLOW_ENTRY_TRADING = True
-ALLOW_EXIT_TRADING = True
-ALLOW_HEDGE_TRADING = True
-KILL_NEW_RISK = False
-EMERGENCY_REDUCE_ONLY = False
-DRY_RUN_PASSED = True
+# ===== 分动作真实交易授权门控 =====
+ALLOW_ENTRY_TRADING = True         # 新开垂直价差（新增风险）
+ALLOW_EXIT_TRADING = True          # 买回短腿 / 卖出保护腿（降低期权风险）
+ALLOW_HEDGE_TRADING = True         # Binance BTCUSDC 永续 / Deribit BTC-PERPETUAL 对冲
+KILL_NEW_RISK = False              # 急停：停新风险；不阻断退出、对冲减仓、对账和孤儿清理
+EMERGENCY_REDUCE_ONLY = False      # 紧急只减：禁止任何开/加仓，对冲强制 reduce_only
+DRY_RUN_PASSED = True              # 实盘门开启前的人工确认项；False 时 live gates 必须关闭
 
-# ===== Runtime cadence =====
-LOOP_INTERVAL_MS = 3000
-PLAN_REFRESH_SECONDS = 45
-APPROVAL_TTL_MS = 30 * 60 * 1000
+# ===== 运行节奏 =====
+LOOP_INTERVAL_MS = 3000            # 主循环间隔；状态栏按此刷新
+PLAN_REFRESH_SECONDS = 45          # 方案库重算最小间隔：节流 API，并避免日志/状态过度刷新
+APPROVAL_TTL_MS = 30 * 60 * 1000   # 方案确认码有效期；超时清锁并要求重新确认
 
-# ===== Portfolio projection limits =====
+# ===== 组合投影预算限额（fail-closed）=====
 PORTFOLIO_LIMITS = {
     "max_open_positions": 1,
     "max_short_gamma": 0.05,
@@ -73,24 +75,24 @@ PORTFOLIO_LIMITS = {
     "max_spread_loss_per_trade": 0.02,
 }
 
-# ===== Exit activity =====
+# ===== 退出活动参数 =====
 EXIT_QUOTE_REFRESH_MS = 3000
 EXIT_ORDER_REST_MS = 4000
 EXIT_REPRICE_COOLDOWN_MS = 6000
 EXIT_MAX_ACTIVE_ORDERS = 1
 EXIT_MAX_PRICE_STEPS_PER_LOOP = 1
-EXIT_RESERVE_RATIO = 0.15
+EXIT_RESERVE_RATIO = 0.15          # 退出预算中的费用/保守预留比例
 
-# ===== Hedge defaults; Binance is the main flow, Deribit is compatibility =====
-HEDGE_REDUCTION_RATIO = 0.5
-HEDGE_CONTRACT_SIZE_FALLBACK = 10.0
-HEDGE_MIN_TRADE_FALLBACK = 10.0
+# ===== 对冲（默认 Binance BTCUSDC 永续；Deribit BTC-PERPETUAL 仅兼容）=====
+HEDGE_REDUCTION_RATIO = 0.5        # 目标覆盖剩余短腿 delta 的比例；压尾部而非全 delta-neutral
+HEDGE_CONTRACT_SIZE_FALLBACK = 10.0   # Deribit BTC-PERPETUAL 合约面值回退(USD)
+HEDGE_MIN_TRADE_FALLBACK = 10.0       # Deribit 最小下单回退(USD/合约)
 HEDGE_OPEN_EXECUTION_STYLE = "PROMPT_LIMIT"
 HEDGE_MAX_SLIPPAGE_BPS = 5
 HEDGE_VENUE = "BINANCE"            # BINANCE | DERIBIT
-HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"
-HEDGE_BINANCE_MIN_TRADE = 0.001
-HEDGE_BINANCE_EXCHANGE_INDEX = 1
+HEDGE_BINANCE_INSTRUMENT = "BTCUSDC"   # 交易员配置仍写 BTCUSDC；FMZ 内部会切 BTC_USDC + swap
+HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性)
+HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
 
 
 def normalize_run_profile(run_profile=None):
@@ -1373,6 +1375,8 @@ def dbt_cancel(order_id):
 默认 `ALLOW_HEDGE_TRADING=False`；跨所对账/恢复需人工核对。
 """
 
+_BINANCE_PERP_CONTRACT_TYPE = "swap"
+
 
 def _ex(idx):
     try:
@@ -1381,13 +1385,37 @@ def _ex(idx):
         return None
 
 
+def _binance_pair(symbol):
+    raw = str(symbol or "BTCUSDC").strip().upper()
+    if "." in raw:
+        raw = raw.split(".", 1)[0]
+    raw = raw.replace("-", "_").replace("/", "_")
+    if "_" in raw:
+        parts = [p for p in raw.split("_") if p]
+        if len(parts) >= 2:
+            return "%s_%s" % (parts[0], parts[1])
+    for quote in ("USDC", "USDT", "USD"):
+        if raw.endswith(quote) and len(raw) > len(quote):
+            return "%s_%s" % (raw[:-len(quote)], quote)
+    return raw
+
+
+def _select_binance_perp(ex, symbol):
+    pair = _binance_pair(symbol)
+    io = getattr(ex, "IO", None)
+    if callable(io):
+        io("currency", pair)
+    ex.SetContractType(_BINANCE_PERP_CONTRACT_TYPE)
+    return pair, _BINANCE_PERP_CONTRACT_TYPE
+
+
 def bnc_get_position_btc(symbol, idx=None):
     """读 BTCUSDC 永续净持仓(BTC；正=多 / 负=空)。读失败 → None。"""
     ex = _ex(idx)
     if ex is None:
         return None
     try:
-        ex.SetContractType(symbol)
+        _select_binance_perp(ex, symbol)
         net = 0.0
         for p in (ex.GetPosition() or []):
             amt = p.get("Amount") or 0.0
@@ -1473,7 +1501,7 @@ def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None
                 "reason": "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
                 "blocked": True, "missing_methods": missing}
     try:
-        ex.SetContractType(symbol)
+        pair, contract_type = _select_binance_perp(ex, symbol)
         t = ex.GetTicker() or {}
         price = _prompt_limit_price(t, side, max_slippage_bps)
         if price is None or price <= 0:
@@ -1503,6 +1531,7 @@ def bnc_place_hedge(symbol, side, amount, reduce_only, allow_live=True, idx=None
                 "symbol": symbol, "side": side, "amount": amount, "price": price,
                 "order_id": oid, "order": resp, "reduce_only": reduce_only,
                 "post_only": False, "execution_style": execution_style,
+                "pair": pair, "contract_type": contract_type,
                 "reason": "BINANCE_HEDGE_STEP"}
     except Exception as e:
         Log("[binance] 下单异常:", str(e))
@@ -2264,12 +2293,14 @@ def _overview_table(ctx):
         profile_line += " / missing " + ",".join(missing)
     else:
         profile_line += " / live checklist ready"
+    self_check = disp_self_check_line(g("startup_self_check"))
     return {
         "type": "table", "title": "运行概览",
         "cols": ["项目", "值"],
         "rows": [
             ["版本 / 主链", "v%s ｜ 完整主链" % (g("version") or "?")],
             ["RUN_PROFILE", profile_line],
+            ["启动自检", self_check],
             ["标的 / 结算币", g("currency")],
             ["目标DTE / 审批TTL", "%sh / %s分" % (g("target_dte_hours"), int((g("approval_ttl_ms") or 0) / 60000))],
             ["人工审计门", disp_manual_gate_state_cn(g("manual_gate_state"))],
@@ -2297,6 +2328,30 @@ def disp_diag_line(diag):
         diag.get("生成候选", 0), diag.get("进入菜单", 0), diag.get("合格", 0)))
 
 
+def disp_self_check_line(self_check):
+    if not self_check:
+        return "未运行"
+    overall = self_check.get("overall") or "UNKNOWN"
+    checks = self_check.get("checks") or {}
+    labels = {
+        "config": "配置",
+        "deribit_index": "Deribit行情",
+        "deribit_options": "Deribit期权",
+        "deribit_account": "Deribit账户",
+        "gex_context": "GEX",
+        "binance_hedge_position": "Binance对冲",
+    }
+    failed = []
+    for key in ("config", "deribit_index", "deribit_options", "deribit_account",
+                "gex_context", "binance_hedge_position"):
+        item = checks.get(key)
+        if item and not item.get("ok"):
+            failed.append("%s:%s" % (labels.get(key, key), item.get("reason") or "FAIL"))
+    if failed:
+        return "%s ｜ %s" % (overall, "；".join(failed))
+    return "%s ｜ 交易所/数据/模块自检通过" % overall
+
+
 def disp_menu_table(menu, selected_no, spot):
     """方案库对比（同期垂直信用价差；★=当前选中的方案号）。"""
     def pct(x):
@@ -2305,19 +2360,37 @@ def disp_menu_table(menu, selected_no, spot):
     def f2(x):
         return ("%.2f" % x) if isinstance(x, (int, float)) else "—"
 
+    def expiry_key(p):
+        return p.get("short_expiry") or p.get("short_expiry_label") or p.get("short_dte_hours")
+
+    def expiry_sort_key(k):
+        return (0, k) if isinstance(k, (int, float)) else (1, str(k))
+
+    has_target = any((p or {}).get("expiry_role") == "TARGET_24H" for p in (menu or []))
+    keys = [expiry_key(p or {}) for p in (menu or []) if expiry_key(p or {}) is not None]
+    nearest_display_key = min(keys, key=expiry_sort_key) if keys else None
+
+    def role_cn(p):
+        role = p.get("expiry_role")
+        if not has_target and nearest_display_key is not None and expiry_key(p) == nearest_display_key:
+            return "最近可用"
+        return {"TARGET_24H": "近24h", "NEXT_EXPIRY": "次日备选"}.get(role, "—")
+
     rows = []
     for p in menu:
         g = p.get
         star = "★" if g("id") == selected_no else ""
         qihao = "%s(同)" % g("short_expiry_label")
-        role = {"TARGET_24H": "近24h", "NEXT_EXPIRY": "次日备选"}.get(g("expiry_role"), "—")
+        code = g("_confirm_code") or g("confirm_code") or "—"
+        if code == "—" and g("_not_lockable_reason"):
+            code = "不可锁定:" + str(g("_not_lockable_reason"))
         tags = "/".join(g("tags") or []) or "—"
         ok = "合格" if g("qualified") else ("✗" + (g("reject_reason") or ""))
         if g("qualified") and g("execution_feasibility_grade"):
             ok = "%s/%s" % (ok, g("execution_feasibility_grade"))
         dte = ("%.1fd" % (g("short_dte_hours") / 24.0)) if g("short_dte_hours") else "—"
         rows.append([
-            "%s%s" % (star, g("id")), tags, role, g("mode_cn") or "—", qihao, dte,
+            "%s%s" % (star, g("id")), code, tags, role_cn(p), g("mode_cn") or "—", qihao, dte,
             "%s(Δ%s)" % (_num(g("short_strike")), _num(g("short_delta"))),
             _num(g("protection_strike")), _num(g("width")),
             _dist_pct(g("short_strike"), spot), pct(g("win_rate")),
@@ -2328,8 +2401,8 @@ def disp_menu_table(menu, selected_no, spot):
         ])
     return {
         "type": "table",
-        "title": "策略选择明细（★=当前选中；有效$=净 credit；24h效率=按资金占用时间折算）",
-        "cols": ["编号", "推荐", "期号角色", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
+        "title": "固定备选方案库（完整展示；不随实时行情重排；VRP_CONTEXT_MISSING=仅展示不可锁定；有效$=净 credit）",
+        "cols": ["编号", "确认码/锁定状态", "推荐", "期号角色", "模式", "期号(短/保护)", "到期", "短行权(Δ)", "保护行权",
                  "腿宽", "短距现价", "胜率", "有效$", "信用/保证金", "24h效率", "盈亏比", "盈亏平衡价",
                  "释放", "合格"],
         "rows": rows,
@@ -2378,9 +2451,10 @@ def _position_table(ctx):
             ("%.0f" % g("execution_feasibility_score"))
             if isinstance(g("execution_feasibility_score"), (int, float)) else "—"),
             ",".join(g("execution_feasibility_warnings") or []) or "—"])
+    title_prefix = "候选方案预览" if g("preview_plan_detail") else "选用方案"
     return {
-        "type": "table", "title": "选用方案 · 保证金与成本（编号 %s · 评级 %s · 预估）"
-        % (g("selected_id"), disp_health_grade(ctx)),
+        "type": "table", "title": "%s · 保证金与成本（编号 %s · 评级 %s · 预估）"
+        % (title_prefix, g("selected_id"), disp_health_grade(ctx)),
         "cols": ["项目", "值/BTC", "≈USD/备注"], "rows": rows,
     }
 
@@ -2523,6 +2597,40 @@ def disp_risk_line(risk):
     return "%s%s" % (state, ("｜" + " ".join(extras)) if extras else "")
 
 
+def disp_pipeline_table(ctx):
+    """完整主链模块总览：计划、确认码、预提交、执行、记账、对冲、退出一屏可见。"""
+    g = ctx.get
+    pending = g("pending_candidates") or []
+    codes = ", ".join("#%s=%s" % (c.get("id"), c.get("confirm_code")) for c in pending) or "—"
+    pre = g("precommit")
+    pre_line = "未触发" if pre is None else ("通过" if pre.get("passed") else "✗ " + ",".join(pre.get("failed") or []))
+    budget = g("projected_budget") or {}
+    rows = [
+        ["计划轮", "reason=%s ｜ diag=%s" % (
+            g("plan_build_reason") or "—",
+            disp_diag_line(g("enum_diag")) if g("enum_diag") else "—")],
+        ["候选展示", "展示%s / 可锁定%s / VRP阻断%s / 来源=%s ｜ %s" % (
+            g("display_candidates_count") or 0,
+            g("lockable_candidates_count") or 0,
+            g("plan_vrp_blocked") or 0,
+            "固定库" if g("plan_library_frozen") else (g("menu_source") or "实时"),
+            g("not_lockable_reason") or "—")],
+        ["确认码", codes],
+        ["预提交", pre_line],
+        ["执行模块", "%s ｜ entry=%s ｜ order_intent=%s" % (
+            g("commit_reason") or "未触发", g("entry_state") or "—", len(g("order_intent") or []))],
+        ["预算模块", budget.get("decision") or "—"],
+        ["记账/恢复", "state=%s ｜ recovery=%s ｜ reconciled=%s" % (
+            disp_state_cn(g("state")), g("recovery_state") or "OK",
+            g("reconciled") if g("reconciled") is not None else "—")],
+        ["对冲模块", g("hedge_state") or ("risk=%s" % (g("risk_state") or "—"))],
+        ["退出模块", "%s ｜ TP=%s ｜ risk_code=%s" % (
+            g("exit_campaign_state") or "—", g("take_profit_ratio") or "—",
+            g("risk_exit_auth_code") or "—")],
+    ]
+    return {"type": "table", "title": "完整主链模块回显", "cols": ["模块", "状态/关键输出"], "rows": rows}
+
+
 def disp_console_table(ctx):
     """交互控制台：每轮置顶。阶段 + 门控 + 人工审计接收 +（待批方案确认码 / 软授权 / 退出活动）+ 操作提示。
     后续阶段（E2 确认码 / E5 软授权 / E6 退出进度）通过 ctx 字段填充对应行。"""
@@ -2578,8 +2686,8 @@ def disp_status_panel(ctx, note=""):
     有方案库时显示方案库对比表；选用/置顶方案有腿时显示其明细/模拟/成本/检查。"""
     header = "%s ｜ %s%s" % (note or "进场流水线", disp_reason_cn(ctx.get("reason")),
                             _header_color(ctx))
-    tables = [disp_console_table(ctx), _overview_table(ctx)]   # 交互控制台置顶 + 概览
-    if ctx.get("menu"):                           # 策略选择明细（已并入到期/盈亏平衡价，无独立概要表）
+    tables = [disp_console_table(ctx), _overview_table(ctx), disp_pipeline_table(ctx)]
+    if ctx.get("menu"):                           # 固定备选方案库：展示完整候选，不靠 Log 刷屏阅读。
         tables.append(disp_menu_table(ctx["menu"], ctx.get("selected_plan"), ctx.get("spot")))
     if ctx.get("short_instrument"):
         tables.append(_position_table(ctx))       # 保证金 + 成本（S:PM 与成本已合并为一张）
@@ -4602,6 +4710,7 @@ import urllib.request
 
 
 _MENU_KEY = "spm_plan_menu_v1"
+_MENU_META_KEY = "spm_plan_menu_meta_v1"
 _MANUAL_CONTEXT_KEY = "spm_manual_context_v1"
 _LAST_COMMAND_KEY = "spm_last_command_v1"
 _LAST = {"plan_ms": 0}
@@ -4857,6 +4966,7 @@ def _ctx_base(state, spot, reason=None):
         "max_chase_steps": MAX_CHASE_STEPS, "min_required_ratio": MIN_MARGIN_RELIEF_RATIO,
         "reason": reason, "spot": spot, "amount": ORDER_AMOUNT,
         "selected_plan": None, "protection_mode": None,
+        "startup_self_check": _G(_SELF_CHECK_KEY),
     }
     return snap
 
@@ -4906,9 +5016,158 @@ def _ctx_with_menu(state, spot, reason, menu, selected_no, detail_plan):
     return ctx
 
 
+def _store_plan_trace(now_ms, reason=None, diag=None, menu_count=0, lockable_count=0,
+                      vrp_blocked=0, not_lockable_reason=None):
+    _G(_PLAN_TRACE_KEY, {
+        "ts": now_ms,
+        "reason": reason,
+        "diag": diag or {},
+        "menu_count": menu_count or 0,
+        "lockable_count": lockable_count or 0,
+        "vrp_blocked": vrp_blocked or 0,
+        "not_lockable_reason": not_lockable_reason,
+    })
+
+
+def _stable_menu_meta_valid(meta, manual_context):
+    """固定备选库是否仍属于当前人工上下文。"""
+    if not meta or not manual_context:
+        return False
+    if meta.get("manual_context_id") != manual_context.get("context_id"):
+        return False
+    if meta.get("manual_context_hash") != manual_context_hash(manual_context):
+        return False
+    if meta.get("config_signature") != manual_context.get("config_signature"):
+        return False
+    return True
+
+
+def _load_stable_menu(manual_context):
+    menu = list(_G(_MENU_KEY) or [])
+    meta = _G(_MENU_META_KEY) or {}
+    if menu and _stable_menu_meta_valid(meta, manual_context):
+        return menu, meta
+    if menu or meta:
+        _G(_MENU_KEY, None)
+        _G(_MENU_META_KEY, None)
+    return [], {}
+
+
+def _store_stable_menu(menu, manual_context, now_ms, reason, diag, lockable_count,
+                       vrp_blocked, not_lockable_reason):
+    menu = list(menu or [])
+    meta = {
+        "ts": now_ms,
+        "manual_context_id": (manual_context or {}).get("context_id"),
+        "manual_context_hash": manual_context_hash(manual_context) if manual_context else None,
+        "config_signature": (manual_context or {}).get("config_signature"),
+        "reason": reason,
+        "diag": diag or {},
+        "menu_count": len(menu),
+        "lockable_count": lockable_count or 0,
+        "vrp_blocked": vrp_blocked or 0,
+        "not_lockable_reason": not_lockable_reason,
+    }
+    _G(_MENU_KEY, menu)
+    _G(_MENU_META_KEY, meta)
+    return meta
+
+
+def _annotate_menu_lock_state(menu, pending=None, not_lockable_reason=None):
+    rows = [dict(p) for p in (menu or [])]
+    codes = dict((c.get("id"), c.get("confirm_code")) for c in (pending or []))
+    for p in rows:
+        pid = p.get("id")
+        if pid in codes and codes[pid]:
+            p["_confirm_code"] = codes[pid]
+            p["_not_lockable_reason"] = None
+        elif not_lockable_reason:
+            p["_confirm_code"] = None
+            p["_not_lockable_reason"] = not_lockable_reason
+    return rows
+
+
+def _locked_display_candidate(locked, menu):
+    if not locked:
+        return None
+    plan_id = locked.get("plan_id")
+    short_i = locked.get("short_instrument")
+    long_i = locked.get("long_instrument")
+    for p in (menu or []):
+        if p.get("id") == plan_id or (
+                p.get("short_instrument") == short_i
+                and p.get("protection_instrument") == long_i):
+            row = dict(p)
+            row["_confirm_code"] = locked.get("confirm_code")
+            row["_locked"] = True
+            return row
+    return None
+
+
 def _emit(ctx, note=""):
     LogStatus(disp_status_panel(ctx, note))
-    Log(disp_log_summary(ctx, note))
+    summary = disp_log_summary(ctx, note)
+    if summary != _G(_LAST_LOG_SUMMARY_KEY):
+        Log(summary)
+        _G(_LAST_LOG_SUMMARY_KEY, summary)
+
+
+def _check_result(ok, reason=None, detail=None):
+    out = {"ok": bool(ok)}
+    if reason:
+        out["reason"] = str(reason)
+    if detail is not None:
+        out["detail"] = detail
+    return out
+
+
+def _startup_self_check(currency):
+    """启动后一轮只读自检：配置、Deribit 行情/账户、GEX 数据、Binance 对冲读仓。"""
+    checks = {}
+    errs = validate_config()
+    checks["config"] = _check_result(not errs, ";".join(errs) if errs else None)
+    try:
+        px = dbt_index_price(currency)
+        ok = isinstance(px, (int, float)) and not isinstance(px, bool) and px > 0
+        checks["deribit_index"] = _check_result(ok, None if ok else "NO_INDEX_PRICE", px)
+    except Exception as e:
+        checks["deribit_index"] = _check_result(False, e)
+    try:
+        instruments = dbt_get_instruments(currency, "option") or []
+        checks["deribit_options"] = _check_result(
+            bool(instruments), None if instruments else "NO_OPTIONS", len(instruments))
+    except Exception as e:
+        checks["deribit_options"] = _check_result(False, e)
+    try:
+        account = dbt_account_summary(currency) or {}
+        checks["deribit_account"] = _check_result(
+            bool(account), None if account else "NO_ACCOUNT_SUMMARY",
+            account.get("margin_model") or account.get("account_type"))
+    except Exception as e:
+        checks["deribit_account"] = _check_result(False, e)
+    try:
+        verdict = fetch_gex_vrp_context(DIRECTION_BIAS)
+        checks["gex_context"] = _check_result(
+            bool(verdict.get("valid")), verdict.get("status"),
+            bool(verdict.get("market_context")))
+    except Exception as e:
+        checks["gex_context"] = _check_result(False, e)
+    if HEDGE_VENUE == "BINANCE":
+        try:
+            qty = bnc_get_position_btc(HEDGE_BINANCE_INSTRUMENT)
+            checks["binance_hedge_position"] = _check_result(
+                qty is not None, None if qty is not None else "HEDGE_POSITION_QUERY_FAILED", qty)
+        except Exception as e:
+            checks["binance_hedge_position"] = _check_result(False, e)
+    else:
+        checks["binance_hedge_position"] = _check_result(True, "SKIPPED_DERIBIT_HEDGE")
+    result = {
+        "overall": "OK" if all(v.get("ok") for v in checks.values()) else "WARN",
+        "checks": checks,
+        "checked_at_ms": _now_ms(),
+    }
+    _G(_SELF_CHECK_KEY, result)
+    return result
 
 
 # ---------- 计划轮 ----------
@@ -4988,6 +5247,9 @@ _LIB_KEY = "spm_reco_lib_v1"
 _LOCKED_KEY = "spm_locked_plan_v1"
 _RUNTIME_KILL_KEY = "spm_runtime_kill_v1"
 _LIB_BUILD_TS_KEY = "spm_lib_build_ts_v1"
+_PLAN_TRACE_KEY = "spm_plan_trace_v1"
+_LAST_LOG_SUMMARY_KEY = "spm_last_log_summary_v1"
+_SELF_CHECK_KEY = "spm_startup_self_check_v1"
 
 
 def _session_id():
@@ -5077,10 +5339,13 @@ def _manual_context_for_cycle(now_ms):
     return ctx
 
 
-def _clear_plan_lineage():
+def _clear_plan_lineage(clear_menu=True):
     _G(_LOCKED_KEY, None)
     _G(_LIB_KEY, None)
     _G(_LIB_BUILD_TS_KEY, 0)
+    if clear_menu:
+        _G(_MENU_KEY, None)
+        _G(_MENU_META_KEY, None)
 
 
 def _approval_expired(snapshot, now_ms):
@@ -6139,9 +6404,15 @@ def run_cycle(now_ms=None):
         locked = None
 
     pending = []
-    display_candidates = []
-    not_lockable_reason = None
+    stable_menu, stable_meta = _load_stable_menu(manual_context)
+    display_candidates = list(stable_menu or [])
+    not_lockable_reason = stable_meta.get("not_lockable_reason")
     plan_vrp_blocked = 0
+    plan_vrp_blocked = stable_meta.get("vrp_blocked") or 0
+    plan_build_reason = stable_meta.get("reason")
+    enum_diag = stable_meta.get("diag")
+    menu_source = "frozen" if display_candidates else "none"
+    plan_build_attempted = False
     commit_result = None
     manage_result = None
     recovery = _recovery_verdict()
@@ -6168,12 +6439,13 @@ def run_cycle(now_ms=None):
         phase = "PLAN_MENU_READY"
         lib = _G(_LIB_KEY)
         if _lineage_invalidated(lib, manual_context, now_ms):
-            _clear_plan_lineage()
+            _clear_plan_lineage(clear_menu=False)
             lib = None
-        last_build = int(_G(_LIB_BUILD_TS_KEY) or 0)
-        if spot and (not lib or now_ms - last_build >= PLAN_REFRESH_SECONDS * 1000):
+        if spot and not display_candidates:
+            plan_build_attempted = True
             menu, _pm_ok, _model, reason, diag = _build_menu(now_ms, spot, manual_context)
-            display_candidates = list(menu or [])
+            plan_build_reason = reason
+            enum_diag = diag
             market_context = (manual_context or {}).get("market_context")
             lockable = []
             if reason == "OK" and menu and market_context:
@@ -6192,15 +6464,47 @@ def run_cycle(now_ms=None):
                 _G(_LIB_KEY, lib)
                 _G(_LIB_BUILD_TS_KEY, now_ms)
             else:
-                _clear_plan_lineage()
+                _clear_plan_lineage(clear_menu=False)
                 lib = None
                 if reason != "OK" and not not_lockable_reason:
                     not_lockable_reason = reason
+            pending_tmp = []
+            if lib and lib.get("recommendations"):
+                pending_tmp = [{"id": s["plan_id"], "summary": s["summary"],
+                                "confirm_code": s["confirm_code"]}
+                               for s in lib["recommendations"][:MENU_SIZE]]
+            display_candidates = _annotate_menu_lock_state(menu or [], pending_tmp, not_lockable_reason)
+            stable_meta = _store_stable_menu(display_candidates, manual_context, now_ms,
+                                             reason, diag, len(pending_tmp or []),
+                                             plan_vrp_blocked, not_lockable_reason)
+            _store_plan_trace(now_ms, reason=reason, diag=diag, menu_count=len(menu or []),
+                              lockable_count=len(pending_tmp or []),
+                              vrp_blocked=plan_vrp_blocked,
+                              not_lockable_reason=not_lockable_reason)
+            menu_source = "built_frozen"
+        elif display_candidates:
+            _store_plan_trace(now_ms, reason=plan_build_reason, diag=enum_diag,
+                              menu_count=len(display_candidates),
+                              lockable_count=stable_meta.get("lockable_count") or 0,
+                              vrp_blocked=plan_vrp_blocked,
+                              not_lockable_reason=not_lockable_reason)
         if lib and lib.get("recommendations"):
             pending = [{"id": s["plan_id"], "summary": s["summary"],
                         "confirm_code": s["confirm_code"]}
                        for s in lib["recommendations"][:MENU_SIZE]]
+            display_candidates = _annotate_menu_lock_state(display_candidates, pending, not_lockable_reason)
+            _G(_MENU_KEY, list(display_candidates or []))
             phase = "HARD_APPROVAL_WAIT"
+    if display_candidates and not pending and not_lockable_reason:
+        display_candidates = _annotate_menu_lock_state(display_candidates, pending, not_lockable_reason)
+        _G(_MENU_KEY, list(display_candidates or []))
+    locked_display = None
+    if locked and phase == "PLAN_LOCKED":
+        locked_display = _locked_display_candidate(locked, display_candidates)
+        if locked_display:
+            display_candidates = [locked_display]
+            menu_source = "locked"
+            not_lockable_reason = None
 
     ctx = _ctx_base(state, spot, "RUN_CYCLE:" + phase)
     _apply_manual_context_to_ctx(ctx, manual_context, manual_check)
@@ -6210,10 +6514,25 @@ def run_cycle(now_ms=None):
     ctx["gate_summary"] = gsum
     ctx["lineage_invalidation"] = lineage_invalidation
     ctx["pending_candidates"] = pending
+    ctx["menu"] = display_candidates
+    ctx["menu_source"] = menu_source
+    ctx["plan_library_frozen"] = bool(display_candidates)
+    detail_plan = locked_display or (display_candidates[0] if display_candidates else None)
+    if detail_plan:
+        try:
+            ctx.update(_flat_plan_fields(detail_plan))
+            ctx["preview_plan_detail"] = "locked_plan" if locked_display else "stable_first_candidate"
+            ctx["selected_plan"] = detail_plan.get("id")
+        except Exception:
+            ctx["preview_plan_detail"] = None
     ctx["display_candidates_count"] = len(display_candidates)
-    ctx["lockable_candidates_count"] = len(pending)
-    ctx["not_lockable_reason"] = not_lockable_reason
-    ctx["plan_vrp_blocked"] = plan_vrp_blocked
+    ctx["lockable_candidates_count"] = 1 if locked_display else len(pending)
+    plan_trace = _G(_PLAN_TRACE_KEY) or {}
+    ctx["not_lockable_reason"] = not_lockable_reason or plan_trace.get("not_lockable_reason")
+    ctx["plan_vrp_blocked"] = plan_vrp_blocked or plan_trace.get("vrp_blocked") or 0
+    ctx["plan_build_reason"] = plan_build_reason or plan_trace.get("reason")
+    ctx["enum_diag"] = enum_diag or plan_trace.get("diag")
+    ctx["plan_build_attempted"] = plan_build_attempted
     ctx["kill_new_risk"] = kill
     ctx["last_command"] = disp.get("action")
     ctx["last_command_outcome"] = disp.get("outcome")
@@ -6258,30 +6577,33 @@ def run_cycle(now_ms=None):
         ctx["recovery_state"] = recovery.get("state")
     if locked and not (commit_result and commit_result.get("committed")):
         ctx["locked_plan_summary"] = "%s %s" % (locked.get("confirm_code"), locked.get("summary"))
-        ctx["preview_plan_detail"] = "locked_plan"
-        ctx["selected_id"] = locked.get("plan_id")
-        ctx["short_instrument"] = locked.get("short_instrument")
-        ctx["protection_instrument"] = locked.get("long_instrument")
-        ctx["short_strike"] = locked.get("short_strike")
-        ctx["protection_strike"] = locked.get("long_strike")
-        ctx["short_delta"] = locked.get("short_delta")
-        ctx["amount"] = locked.get("amount")
-        ctx["net_credit"] = locked.get("entry_net_credit_after_costs")
-        ctx["margin_relief_ratio"] = locked.get("margin_relief_ratio")
-        ctx["execution_feasibility_grade"] = locked.get("execution_feasibility_grade")
-        ctx["execution_feasibility_score"] = locked.get("execution_feasibility_score")
-        ctx["execution_feasibility_score_norm"] = locked.get("execution_feasibility_score_norm")
-        ctx["execution_feasibility_warnings"] = locked.get("execution_feasibility_warnings") or []
-        ctx["menu"] = [{
-            "id": locked.get("plan_id"),
-            "short_instrument": locked.get("short_instrument"),
-            "protection_instrument": locked.get("long_instrument"),
-            "short_strike": locked.get("short_strike"),
-            "protection_strike": locked.get("long_strike"),
-            "amount": locked.get("amount"),
-            "net_credit_effective": locked.get("entry_net_credit_after_costs"),
-            "margin_relief_ratio": locked.get("margin_relief_ratio"),
-        }]
+        if not ctx.get("preview_plan_detail"):
+            ctx["preview_plan_detail"] = "locked_plan"
+            ctx["selected_id"] = locked.get("plan_id")
+            ctx["selected_plan"] = locked.get("plan_id")
+            ctx["short_instrument"] = locked.get("short_instrument")
+            ctx["protection_instrument"] = locked.get("long_instrument")
+            ctx["short_strike"] = locked.get("short_strike")
+            ctx["protection_strike"] = locked.get("long_strike")
+            ctx["short_delta"] = locked.get("short_delta")
+            ctx["amount"] = locked.get("amount")
+            ctx["net_credit"] = locked.get("entry_net_credit_after_costs")
+            ctx["margin_relief_ratio"] = locked.get("margin_relief_ratio")
+            ctx["execution_feasibility_grade"] = locked.get("execution_feasibility_grade")
+            ctx["execution_feasibility_score"] = locked.get("execution_feasibility_score")
+            ctx["execution_feasibility_score_norm"] = locked.get("execution_feasibility_score_norm")
+            ctx["execution_feasibility_warnings"] = locked.get("execution_feasibility_warnings") or []
+        if not ctx.get("menu"):
+            ctx["menu"] = [{
+                "id": locked.get("plan_id"),
+                "short_instrument": locked.get("short_instrument"),
+                "protection_instrument": locked.get("long_instrument"),
+                "short_strike": locked.get("short_strike"),
+                "protection_strike": locked.get("long_strike"),
+                "amount": locked.get("amount"),
+                "net_credit_effective": locked.get("entry_net_credit_after_costs"),
+                "margin_relief_ratio": locked.get("margin_relief_ratio"),
+            }]
     _emit(ctx, "manual-gate")
     return ctx
 
@@ -6297,6 +6619,8 @@ def main():
         "PROFILE=%s" % _g["profile"],
         "ALLOW_ENTRY=%s" % _g["allow_entry"],
         "currency=%s" % SETTLEMENT_CURRENCY)
+    self_check = _startup_self_check(SETTLEMENT_CURRENCY)
+    Log("[self-check]", disp_self_check_line(self_check))
     startup_recovery_check(SETTLEMENT_CURRENCY)        # 启动恢复：可解释映射 → OK/RECOVERY_BLOCKED/ORPHAN
 
     while True:

@@ -31,10 +31,11 @@ def test_entry_campaign_decision_branches():
     assert E.entry_campaign_decision(True, False, True, 0, 20, False, False)["state"] == E.ENTRY_PAUSED_DATA
     # 信用底线不满足 + 仍有额度 → 暂停等市场
     assert E.entry_campaign_decision(True, True, False, 5, 20, False, False)["state"] == E.ENTRY_PAUSED_CREDIT
-    # 信用底线不满足 + 额度耗尽 → 放弃
-    assert E.entry_campaign_decision(True, True, False, 20, 20, False, False)["state"] == E.ENTRY_ABANDONED
+    # 信用底线不满足 + 软等待上限耗尽 → 仍保持锁定方案，等待市场恢复/人工拒绝
+    assert E.entry_campaign_decision(True, True, False, 20, 20, False, False)["state"] == E.ENTRY_PAUSED_CREDIT
     # 可成交
     ok = E.entry_campaign_decision(True, True, True, 3, 20, False, False)
     assert ok["state"] == E.ENTRY_WORKING and ok["can_order"]
-    # 额度耗尽仍未成交 → 放弃
-    assert E.entry_campaign_decision(True, True, True, 20, 20, False, False)["state"] == E.ENTRY_ABANDONED
+    # 等待上限耗尽但完全无成交 → 不清锁、不回方案库，继续围绕锁定方案工作
+    capped = E.entry_campaign_decision(True, True, True, 20, 20, False, False)
+    assert capped["state"] == E.ENTRY_WORKING and capped["can_order"]

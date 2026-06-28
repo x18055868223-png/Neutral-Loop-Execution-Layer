@@ -21,7 +21,7 @@ OUT = os.path.join(HERE, "spm_manual_gate_execution_fmz.py")
 
 # 拼接顺序（全为函数/常量定义，运行时才互相调用，故顺序仅为可读性）
 MODULE_ORDER = ["config", "manual_context", "gates", "cmd_router", "recommend", "position",
-                "authorization", "deribit_io", "binance_io", "leg_selection",
+                "deribit_io", "binance_io", "leg_selection",
                 "accounting", "plans", "display", "spm_sim", "hedge", "execution", "ledger",
                 "execution_feasibility", "hedge_risk", "risk_controls",
                 "strategy"]
@@ -113,7 +113,7 @@ def check(src):
                "build_recommendation_library", "resolve_confirm_code", "evaluate_precommit_checks",
                "build_vertical_entry_snapshot", "evaluate_projected_budget",
                "evaluate_execution_feasibility", "feasibility_penalty",
-               "unified_action_arbiter", "evaluate_startup_recovery", "authorize_from_code",
+               "unified_action_arbiter", "evaluate_startup_recovery",
                "exec_exit_buyback_step", "exit_campaign_decision", "hedge_target_contracts",
                "hedge_order_action", "disp_console_table", "gate_decision"):
         assert fn in ns, "bundle 缺少 %s" % fn

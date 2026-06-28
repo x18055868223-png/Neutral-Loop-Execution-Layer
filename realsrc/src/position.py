@@ -66,6 +66,9 @@ def build_vertical_entry_snapshot(locked, short_fill, long_fill, entry_fees,
         "side": locked.get("side"),
         "short_instrument": locked.get("short_instrument"),
         "long_instrument": locked.get("long_instrument"),
+        "short_strike": locked.get("short_strike"),
+        "long_strike": locked.get("long_strike"),
+        "breakeven": locked.get("breakeven"),
         "short_fill_amount": sa, "short_fill_price": sc,
         "long_fill_amount": la, "long_fill_price": lc,
         "entry_fees": entry_fees,
@@ -211,7 +214,8 @@ def entry_credit_capped_index(prot_buy_prices, short_sell_prices, amount, total_
 
 def entry_campaign_decision(has_locked, quotes_ok, credit_ok, attempts, max_attempts,
                             prot_done, short_done):
-    """开仓活动下一状态 / 是否可下单（纯）。信用底线不满足 → 暂停等市场或（额度耗尽）放弃。"""
+    """开仓活动下一状态 / 是否可下单（纯）。
+    max_attempts 只保留为软计数提示，不代表清锁/放弃；保护腿兜底由订单等待时间触发。"""
     if not has_locked:
         return {"state": ENTRY_IDLE, "can_order": False, "reason": "NO_LOCKED_PLAN"}
     if prot_done and short_done:
@@ -219,11 +223,9 @@ def entry_campaign_decision(has_locked, quotes_ok, credit_ok, attempts, max_atte
     if not quotes_ok:
         return {"state": ENTRY_PAUSED_DATA, "can_order": False, "reason": "NO_RELIABLE_QUOTE"}
     if not credit_ok:
-        if attempts >= max_attempts:
-            return {"state": ENTRY_ABANDONED, "can_order": False, "reason": "CREDIT_FLOOR_UNREACHABLE"}
         return {"state": ENTRY_PAUSED_CREDIT, "can_order": False, "reason": "BELOW_CREDIT_FLOOR_WAIT"}
     if attempts >= max_attempts:
-        return {"state": ENTRY_ABANDONED, "can_order": False, "reason": "MAX_ATTEMPTS_EXCEEDED"}
+        return {"state": ENTRY_WORKING, "can_order": True, "reason": "SOFT_ATTEMPT_LIMIT_KEEP_LOCKED"}
     return {"state": ENTRY_WORKING, "can_order": True, "reason": "POST_WITHIN_CREDIT_FLOOR"}
 
 
