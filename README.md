@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_12.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_13.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.12-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.13-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -138,6 +138,11 @@ This repository contains the current independent execution-layer deliverable onl
   strategy hedge evaluation fails closed on non-Binance hedge venues, and
   legacy Deribit perp hedge live execution is blocked before quote/order calls.
   Deribit option entry, exit, quote, and recovery logic are unchanged.
+- v3.2.13 adds crash-trigger observability to the trader read screen. The V32
+  hedge policy now carries `crash_ref_price`, `crash_ref_age_seconds`, and
+  `crash_adverse_bps` into `POSITION_MANAGE`, and the risk/hedge table renders
+  a read-only `Crash观测` row. No hedge gate, trigger threshold, or conditional
+  order behavior changes.
 
 ## Boundary
 

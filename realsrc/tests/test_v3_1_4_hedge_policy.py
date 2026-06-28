@@ -438,6 +438,8 @@ def test_crash_overrides_final3_and_add_cooldown():
     assert h["policy_detail"]["eff_target_qty"] == 0.02
     assert h["action"]["action"] == "HEDGE_OPEN"
     assert h["policy_detail"]["reason"] == "CRASH_TRIGGER_SPEED"
+    assert h["policy_detail"]["crash_ref_price"] == 60000.0
+    assert h["policy_detail"]["crash_ref_age_seconds"] == 300.0
 
 
 def test_submit_sets_pending_and_next_plan_is_idempotent():

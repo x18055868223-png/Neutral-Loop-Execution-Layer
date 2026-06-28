@@ -2462,8 +2462,13 @@ def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
                          eff_target, current, delta, action, cross_bps,
                          warnings=None, wants_action=False,
                          soft_ratio=None, rebalance_deadband=None,
-                         min_hold_until=None, crash_adverse_bps=None):
+                         min_hold_until=None, crash_adverse_bps=None,
+                         now_ms=None):
     cr = (risk or {}).get("current_risk") or {}
+    crash_ref_ts = st.get("crash_ref_ts") or 0
+    crash_ref_age_seconds = None
+    if isinstance(now_ms, (int, float)) and not isinstance(now_ms, bool) and crash_ref_ts:
+        crash_ref_age_seconds = max(0.0, (now_ms - crash_ref_ts) / 1000.0)
     detail = {
         "policy": "V32",
         "position_id": st.get("position_id"),
@@ -2485,6 +2490,8 @@ def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
         "gamma_data_state": (hedge or {}).get("gamma_data_state"),
         "rebalance_deadband": rebalance_deadband,
         "final3_mode": HEDGE_FINAL3H_MODE,
+        "crash_ref_price": st.get("crash_ref_price"),
+        "crash_ref_age_seconds": crash_ref_age_seconds,
         "crash_adverse_bps": crash_adverse_bps,
         "min_hold_until": min_hold_until,
         "target_semantics": (hedge or {}).get("target_semantics"),
@@ -2896,7 +2903,8 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
         st, out, risk, trigger_state, reason, full_target, eff_target,
         current, delta, action, cross_bps, warnings, wants_action=wants,
         soft_ratio=soft_ratio, rebalance_deadband=rebalance_deadband,
-        min_hold_until=min_hold_until, crash_adverse_bps=crash_adverse_bps)
+        min_hold_until=min_hold_until, crash_adverse_bps=crash_adverse_bps,
+        now_ms=now_ms)
     return out
 
 
@@ -3250,6 +3258,8 @@ def _build_hedge_detail(hedge, risk):
             "gamma_data_state": hp.get("gamma_data_state"),
             "rebalance_deadband": hp.get("rebalance_deadband"),
             "final3_mode": hp.get("final3_mode"),
+            "crash_ref_price": hp.get("crash_ref_price"),
+            "crash_ref_age_seconds": hp.get("crash_ref_age_seconds"),
             "crash_adverse_bps": hp.get("crash_adverse_bps"),
             "min_hold_until": hp.get("min_hold_until"),
             "target_semantics": hp.get("target_semantics"),

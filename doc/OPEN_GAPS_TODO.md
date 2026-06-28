@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.12-manual-gate`
+- Latest completed release: `3.2.13-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -141,6 +141,14 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `exec_hedge_step()` blocks legacy Deribit perp hedge live execution before
   quote/order calls.
 
+## Closed In v3.2.13
+
+- [x] P2: surface crash reference price/age in `POSITION_MANAGE` as
+  observability only. `policy_detail` now carries `crash_ref_price`,
+  `crash_ref_age_seconds`, and `crash_adverse_bps`; the risk/hedge table renders
+  a `Crash观测` row that explicitly states it is read-only and does not add
+  gates or native conditional orders.
+
 ## Must Fix Next
 
 - [ ] P1: no open must-fix item currently identified beyond cleanup candidates
@@ -151,8 +159,6 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 - [ ] Clarify or rename `HEDGE_REDUCTION_RATIO` so it is not mistaken for the
   default gamma-aware full-target sizing control. It is legacy sizing context
   when gamma-aware behavior is disabled or when building entry risk anchors.
-- [ ] Consider surfacing crash reference age/price in `POSITION_MANAGE` as
-  observability only. Do not add new hedge gates or native conditional orders.
 
 ## Guardrails For Every Iteration
 

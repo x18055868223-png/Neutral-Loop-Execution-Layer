@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.12-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.13-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.12-manual-gate"
+STRATEGY_VERSION = "3.2.13-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -2732,6 +2732,11 @@ def _risk_hedge_table(ctx):
                 _num(h.get("crash_adverse_bps")),
                 _num(h.get("min_hold_until"), small=0, big=0)),
              h.get("final3_mode") or "NORMAL"],
+            ["Crash观测", "ref %s ｜ age %ss ｜ adverse %sbps" % (
+                _num(h.get("crash_ref_price"), small=2, big=2),
+                _num(h.get("crash_ref_age_seconds"), small=0, big=0),
+                _num(h.get("crash_adverse_bps"))),
+             "只读观测，不新增门控或条件单"],
             ["控制器门控", "cross_bps %s ｜ %s ｜ cost_bps %s ｜ warn %s" % (
                 _num(h.get("policy_cross_bps")), cooldown,
                 _num(h.get("episode_cost_bps")), warnings),
@@ -7755,8 +7760,13 @@ def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
                          eff_target, current, delta, action, cross_bps,
                          warnings=None, wants_action=False,
                          soft_ratio=None, rebalance_deadband=None,
-                         min_hold_until=None, crash_adverse_bps=None):
+                         min_hold_until=None, crash_adverse_bps=None,
+                         now_ms=None):
     cr = (risk or {}).get("current_risk") or {}
+    crash_ref_ts = st.get("crash_ref_ts") or 0
+    crash_ref_age_seconds = None
+    if isinstance(now_ms, (int, float)) and not isinstance(now_ms, bool) and crash_ref_ts:
+        crash_ref_age_seconds = max(0.0, (now_ms - crash_ref_ts) / 1000.0)
     detail = {
         "policy": "V32",
         "position_id": st.get("position_id"),
@@ -7778,6 +7788,8 @@ def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
         "gamma_data_state": (hedge or {}).get("gamma_data_state"),
         "rebalance_deadband": rebalance_deadband,
         "final3_mode": HEDGE_FINAL3H_MODE,
+        "crash_ref_price": st.get("crash_ref_price"),
+        "crash_ref_age_seconds": crash_ref_age_seconds,
         "crash_adverse_bps": crash_adverse_bps,
         "min_hold_until": min_hold_until,
         "target_semantics": (hedge or {}).get("target_semantics"),
@@ -8189,7 +8201,8 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
         st, out, risk, trigger_state, reason, full_target, eff_target,
         current, delta, action, cross_bps, warnings, wants_action=wants,
         soft_ratio=soft_ratio, rebalance_deadband=rebalance_deadband,
-        min_hold_until=min_hold_until, crash_adverse_bps=crash_adverse_bps)
+        min_hold_until=min_hold_until, crash_adverse_bps=crash_adverse_bps,
+        now_ms=now_ms)
     return out
 
 
@@ -8543,6 +8556,8 @@ def _build_hedge_detail(hedge, risk):
             "gamma_data_state": hp.get("gamma_data_state"),
             "rebalance_deadband": hp.get("rebalance_deadband"),
             "final3_mode": hp.get("final3_mode"),
+            "crash_ref_price": hp.get("crash_ref_price"),
+            "crash_ref_age_seconds": hp.get("crash_ref_age_seconds"),
             "crash_adverse_bps": hp.get("crash_adverse_bps"),
             "min_hold_until": hp.get("min_hold_until"),
             "target_semantics": hp.get("target_semantics"),

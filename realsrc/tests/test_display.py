@@ -402,6 +402,43 @@ def test_position_manage_data_gap_uses_explicit_gap_text():
     assert "数据缺口" in ledger_rows["交易所对账"]
 
 
+def test_position_manage_surfaces_crash_reference_observability_only():
+    ctx = _ctx()
+    ctx.update(
+        console_phase="POSITION_MANAGE",
+        state="SHORT_ACTIVE_PROTECTED",
+        hedge_detail={
+            "venue": "BINANCE",
+            "instrument": "BTCUSDC",
+            "side": "buy",
+            "action_cn": "新开对冲",
+            "action": "HEDGE_OPEN",
+            "reduce_only": False,
+            "hedge_policy": "V32",
+            "policy_state": "CRASH",
+            "policy_reason": "CRASH_TRIGGER_SPEED",
+            "full_target_qty": 0.02,
+            "eff_target_qty": 0.02,
+            "current_hedge_qty": 0.0,
+            "policy_delta_to_trade": 0.02,
+            "crash_ref_price": 60000.0,
+            "crash_ref_age_seconds": 300.0,
+            "crash_adverse_bps": 116.7,
+        },
+        take_profit_detail={"status": "未达标", "ratio": 0.2, "target_ratio": 0.8},
+        ledger_detail={"reconciled": True, "recovery_state": "OK", "active_orders": []},
+    )
+
+    tables = _tables_from_panel(D.disp_status_panel(ctx, "测试"))
+    hedge_rows = {r[0]: r[1:] for r in next(t for t in tables if t["title"] == "风险与对冲")["rows"]}
+
+    assert "Crash观测" in hedge_rows
+    assert "60000" in hedge_rows["Crash观测"][0]
+    assert "300" in hedge_rows["Crash观测"][0]
+    assert "116.7" in hedge_rows["Crash观测"][0]
+    assert "只读观测" in hedge_rows["Crash观测"][1]
+
+
 def test_console_kill_hint_overrides():
     ctx = _ctx(); ctx.update(kill_new_risk=True, console_phase="POSITION_MANAGE")
     assert "无需交互" in D.disp_operation_hint(ctx)

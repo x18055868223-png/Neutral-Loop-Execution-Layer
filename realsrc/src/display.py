@@ -591,6 +591,11 @@ def _risk_hedge_table(ctx):
                 _num(h.get("crash_adverse_bps")),
                 _num(h.get("min_hold_until"), small=0, big=0)),
              h.get("final3_mode") or "NORMAL"],
+            ["Crash观测", "ref %s ｜ age %ss ｜ adverse %sbps" % (
+                _num(h.get("crash_ref_price"), small=2, big=2),
+                _num(h.get("crash_ref_age_seconds"), small=0, big=0),
+                _num(h.get("crash_adverse_bps"))),
+             "只读观测，不新增门控或条件单"],
             ["控制器门控", "cross_bps %s ｜ %s ｜ cost_bps %s ｜ warn %s" % (
                 _num(h.get("policy_cross_bps")), cooldown,
                 _num(h.get("episode_cost_bps")), warnings),
