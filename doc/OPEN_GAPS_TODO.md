@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.3-manual-gate`
+- Latest completed release: `3.2.4-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -60,12 +60,20 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `POSITION_MANAGE` ledger detail now surfaces settlement count/cashflow,
   protection recovery, option realized PnL, and final PnL status.
 
+## Closed In v3.2.4
+
+- [x] P1: real current portfolio inputs for precommit budget.
+  `_current_portfolio()` now reads account summary and strict option positions,
+  accumulates current short-option gamma/vega load, derives margin usage from
+  account initial margin, and returns explicit data gaps for account,
+  option-position, size, or short-option Greek failures.
+- [x] P1: projected-budget fail-closed on current portfolio data gaps.
+  `_build_precommit_live()` now converts current-portfolio `data_gap` into a
+  `ProjectedBudgetPackage` with `decision=BLOCK`, instead of passing an
+  incomplete current portfolio into zero-default budget math.
+
 ## Must Fix Next
 
-- [ ] P1: real current portfolio inputs for precommit budget.
-  `_current_portfolio()` still returns fixed zeros. Replace with strict account
-  summary + option position reads; account/position/Greek gaps must block new
-  entry, not default to zero.
 - [ ] P1: no-snapshot orphan hedge policy decision.
   v3.2.1 chose safe manual cleanup display. Later decide whether to keep this
   as the permanent policy or add ownership-proven reduce-only cleanup with

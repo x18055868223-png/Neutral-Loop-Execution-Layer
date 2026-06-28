@@ -861,7 +861,138 @@ _POSITION_KEY = "spm_entry_snapshot_v1"      # 冻结的 VerticalEntrySnapshot
 
 def _current_portfolio():
     """当前组合风险载荷（E3：无并发持仓时为空；E4 接入真实多仓汇总）。"""
-    return {"open_positions": 0, "short_gamma": 0.0, "short_vega": 0.0, "margin_used": 0.0}
+    account = dbt_account_summary(SETTLEMENT_CURRENCY)
+    if not isinstance(account, dict) or not account:
+        return _current_portfolio_gap("ACCOUNT_SUMMARY_QUERY_FAILED")
+
+    margin_used, margin_source = _account_margin_used(account)
+    if margin_used is None:
+        return _current_portfolio_gap("ACCOUNT_MARGIN_DATA_GAP")
+
+    positions = dbt_get_positions_strict(SETTLEMENT_CURRENCY, kind="option")
+    if positions is None:
+        return _current_portfolio_gap("OPTION_POSITION_QUERY_FAILED")
+
+    open_positions = 0
+    short_gamma = 0.0
+    short_vega = 0.0
+    for pos in positions:
+        if not isinstance(pos, dict):
+            return _current_portfolio_gap("OPTION_POSITION_DATA_GAP")
+        inst = pos.get("instrument_name") or pos.get("instrument")
+        size = _position_size(pos)
+        if size is None:
+            return _current_portfolio_gap("OPTION_POSITION_SIZE_DATA_GAP", inst)
+        if abs(size) <= 1e-12:
+            continue
+        open_positions += 1
+        short_amount = _short_position_amount(pos, size)
+        if short_amount <= 0.0:
+            continue
+        gamma = _position_greek(pos, "gamma")
+        vega = _position_greek(pos, "vega")
+        if gamma is None or vega is None:
+            return _current_portfolio_gap("OPTION_GREEK_DATA_GAP", inst)
+        short_gamma += short_amount * abs(gamma)
+        short_vega += short_amount * abs(vega)
+
+    return {
+        "data_gap": None,
+        "open_positions": open_positions,
+        "short_gamma": short_gamma,
+        "short_vega": short_vega,
+        "margin_used": margin_used,
+        "margin_used_source": margin_source,
+        "option_position_count": open_positions,
+    }
+
+
+def _current_portfolio_gap(reason, instrument=None):
+    out = {"data_gap": reason}
+    if instrument:
+        out["data_gap_instrument"] = instrument
+    return out
+
+
+def _portfolio_float(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    return None
+
+
+def _account_margin_used(account):
+    initial_margin = _portfolio_float((account or {}).get("initial_margin"))
+    if initial_margin is None:
+        initial_margin = _portfolio_float((account or {}).get("initial_margin_used"))
+    if initial_margin is None:
+        return None, None
+
+    equity = _portfolio_float((account or {}).get("equity"))
+    if equity is None:
+        equity = _portfolio_float((account or {}).get("margin_balance"))
+    if equity is None:
+        equity = _portfolio_float((account or {}).get("balance"))
+    if equity is not None and equity > 0.0:
+        return initial_margin / equity, "initial_margin/equity"
+    return initial_margin, "initial_margin"
+
+
+def _position_size(pos):
+    raw = (pos or {}).get("size")
+    if raw is None:
+        raw = (pos or {}).get("amount")
+    return _portfolio_float(raw)
+
+
+def _short_position_amount(pos, size):
+    side = str((pos or {}).get("direction") or (pos or {}).get("side") or "").lower()
+    if size < -1e-12:
+        return abs(size)
+    if side in ("sell", "short"):
+        return abs(size)
+    return 0.0
+
+
+def _position_greek(pos, name):
+    value = _portfolio_float((pos or {}).get(name))
+    if value is not None:
+        return value
+    greeks = (pos or {}).get("greeks")
+    if isinstance(greeks, dict):
+        value = _portfolio_float(greeks.get(name))
+        if value is not None:
+            return value
+    inst = (pos or {}).get("instrument_name") or (pos or {}).get("instrument")
+    if not inst:
+        return None
+    try:
+        ticker = dbt_ticker(inst)
+    except Exception:
+        return None
+    tgreeks = (ticker or {}).get("greeks")
+    if not isinstance(tgreeks, dict):
+        return None
+    return _portfolio_float(tgreeks.get(name))
+
+
+def _current_portfolio_gap_budget(current):
+    reason = (current or {}).get("data_gap") or "UNKNOWN"
+    return {
+        "schema_name": "ProjectedBudgetPackage",
+        "schema_version": "nrd.integration.projected_budget.v1",
+        "decision": "BLOCK",
+        "projected": {},
+        "fail_closed": True,
+        "reason_codes": ["CURRENT_PORTFOLIO_DATA_GAP:" + str(reason)],
+        "current": current or {},
+    }
 
 
 _KNOWN_ORDER_LABELS = ("entry", "exit", "short", "prot", "hedge", "recover", "risk_exit")
@@ -1001,7 +1132,11 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
         "hedge_margin_reserve": 0.0,             # E7 接对冲保证金估算
         "fee_reserve": fee_reserve,
     }
-    budget = evaluate_projected_budget(proposed, _current_portfolio(), PORTFOLIO_LIMITS)
+    current_portfolio = _current_portfolio()
+    if (current_portfolio or {}).get("data_gap"):
+        budget = _current_portfolio_gap_budget(current_portfolio)
+    else:
+        budget = evaluate_projected_budget(proposed, current_portfolio, PORTFOLIO_LIMITS)
     rec = ledger_reconcile(SETTLEMENT_CURRENCY)
     reconciled = (rec.get("actual") == rec.get("expected"))
     manual_check = validate_manual_context(manual_context, now_ms)
@@ -1018,6 +1153,8 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
         "quotes_fresh": quotes_fresh,
         "net_credit_after_costs": net_credit,
         "projected_budget_decision": budget.get("decision"),
+        "current_portfolio": current_portfolio,
+        "current_portfolio_data_gap": (current_portfolio or {}).get("data_gap"),
         "ledger_reconciled": reconciled,
         "no_unknown_orders": order_safety.get("ok") is True,  # C3：真实活动订单查询 + 同腿入场残单防重挂
         "order_conflict_reason": order_safety.get("reason"),

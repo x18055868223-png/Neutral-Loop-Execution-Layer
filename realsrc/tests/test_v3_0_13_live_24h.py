@@ -14,7 +14,7 @@ SPOT = 60000.0
 
 
 def test_default_config_is_live_ready_without_legacy_operator_fields():
-    assert C.STRATEGY_VERSION == "3.2.3-manual-gate"
+    assert C.STRATEGY_VERSION == "3.2.4-manual-gate"
     assert C.RUN_PROFILE == "LIVE"
     assert C.DRY_RUN_PASSED is True
     assert C.ALLOW_ENTRY_TRADING is True

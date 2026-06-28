@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_3.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_4.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.3-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.4-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -99,6 +99,10 @@ This repository contains the current independent execution-layer deliverable onl
   option realized PnL is recomputed from entry credit, exits, recovery, and
   settlement, and the position-management ledger table surfaces settlement,
   recovery, realized PnL, and final PnL status.
+- v3.2.4 replaces fixed-zero current portfolio budget inputs with strict
+  account summary and option-position reads. Account, option-position, position
+  size, or short-option Greek data gaps now block new entries through the
+  projected-budget package instead of defaulting current load to zero.
 
 ## Boundary
 
