@@ -66,11 +66,56 @@ def option_net_delta(remaining_short_qty, short_delta, long_remaining_qty=0.0,
     return net
 
 
+def _clamp(value, lo, hi):
+    return max(lo, min(hi, value))
+
+
+def hedge_gamma_fraction(short_gamma, long_gamma, remaining_short_qty,
+                         long_remaining_qty, spot, ref, floor):
+    """Gamma-aware SOFT hedge fraction.
+
+    Missing gamma falls back to floor instead of zero; protection gamma offsets
+    short gamma by current remaining leg quantities.
+    """
+    fl = _clamp(float(floor or 0.0), 0.0, 1.0)
+    if not _is_num(spot) or spot <= 0 or not _is_num(ref) or ref <= 0:
+        return fl
+    combo_gamma = 0.0
+    has_gamma = False
+    if _is_num(short_gamma):
+        combo_gamma += -(remaining_short_qty or 0.0) * short_gamma
+        has_gamma = True
+    if _is_num(long_gamma):
+        combo_gamma += (long_remaining_qty or 0.0) * long_gamma
+        has_gamma = True
+    if not has_gamma:
+        return fl
+    dollar_gamma = abs(combo_gamma) * spot * spot
+    norm = _clamp(dollar_gamma / ref, 0.0, 1.0)
+    return _clamp(fl + (1.0 - fl) * norm, fl, 1.0)
+
+
+def hedge_rebalance_deadband(full_target, min_trade, band_frac):
+    min_qty = max(0.0, min_trade or 0.0)
+    frac = max(0.0, band_frac or 0.0)
+    return max(min_qty, abs(full_target or 0.0) * frac)
+
+
+def hedge_target_ratio_for_soft(base_ratio, gamma_fraction, persisted=False, worsened=False):
+    if persisted or worsened:
+        return 1.0
+    base = _clamp(base_ratio or 0.0, 0.0, 1.0)
+    gamma = _clamp(gamma_fraction or 0.0, 0.0, 1.0)
+    return max(base, gamma)
+
+
 def _round_abs_to_step(value, step):
     if not step or step <= 0:
         return value
     sign = -1.0 if value < 0 else 1.0
-    return sign * round(abs(value) / step) * step
+    units = abs(value) / step
+    rounded_units = int(units + 0.5 + 1e-12)
+    return sign * rounded_units * step
 
 
 def hedge_target_position(net_option_delta, reduction_ratio, spot, contract_size,

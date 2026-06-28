@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.1.4-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.1.5-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,8 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.1.4-manual-gate"
+STRATEGY_VERSION = "3.1.5-manual-gate"
+SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
 # ===== VRP_CONTEXT 数据源（只检查上下文有效性，不做旧价格门控）=====
@@ -746,6 +747,7 @@ def build_approval_snapshot(candidate, session_id, manual_context, refresh_seq, 
         "short_strike": candidate.get("short_strike"),
         "long_strike": candidate.get("protection_strike"),
         "short_expiry": candidate.get("short_expiry"),
+        "long_expiry": candidate.get("protection_expiry") or candidate.get("short_expiry"),
         "short_dte_hours": candidate.get("short_dte_hours"),
         "short_delta": candidate.get("short_delta"),
         "breakeven": candidate.get("breakeven"),
@@ -958,6 +960,7 @@ def build_vertical_entry_snapshot(locked, short_fill, long_fill, entry_fees,
         "remaining_short_qty": sa,
         "long_remaining_qty": la,          # 保护腿剩余（回收时递减；持仓真相之一）
         "short_expiry_ts": locked.get("short_expiry"),     # 短腿到期（持仓后 DTE/风险评估用）
+        "long_expiry_ts": locked.get("long_expiry") or locked.get("short_expiry"),
         "entry_risk_anchor": entry_risk_anchor,            # 入场风险锚（风险严重度→仲裁）
         "hedge_trigger_policy": (entry_risk_anchor or {}).get("hedge_trigger_policy"),
         "frozen_ts": now_ts,
@@ -6382,6 +6385,105 @@ def _append_execution_history(snap, key, item, now_ms):
     return snap
 
 
+def _settlement_is_num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _option_position_map(option_positions):
+    actual = {}
+    for p in option_positions or []:
+        inst = (p or {}).get("instrument_name") or (p or {}).get("instrument")
+        if not inst:
+            continue
+        raw_size = (p or {}).get("size")
+        if raw_size is None:
+            raw_size = (p or {}).get("amount")
+        try:
+            size = float(raw_size or 0.0)
+        except Exception:
+            size = 0.0
+        actual[inst] = actual.get(inst, 0.0) + size
+    return actual
+
+
+def _leg_expired_for_settlement(expiry_ts, now_ms):
+    return (_settlement_is_num(expiry_ts) and _settlement_is_num(now_ms)
+            and now_ms >= expiry_ts + SETTLEMENT_RECONCILE_GRACE_MS)
+
+
+def _leg_absent_or_zero(actual, inst):
+    if not inst:
+        return False
+    return abs(actual.get(inst, 0.0) or 0.0) <= 1e-9
+
+
+def _append_settlement_event(snap, event):
+    rec = dict(event or {})
+    rec.setdefault("settlement_pnl_ccy", None)
+    rec.setdefault("settlement_pnl_status", "NOT_COMPUTED")
+    hist = list((snap or {}).get("option_settlement_history") or [])
+    hist.append(rec)
+    snap["option_settlement_history"] = hist[-50:]
+
+
+def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
+    if not snap:
+        return {"snap": snap, "changed": False, "events": [],
+                "settlement_state": "NONE", "reason": "NO_POSITION_SNAPSHOT"}
+    actual = _option_position_map(option_positions)
+    updated = dict(snap)
+    events = []
+    short_inst = updated.get("short_instrument")
+    long_inst = updated.get("long_instrument")
+    short_expiry = updated.get("short_expiry_ts")
+    long_expiry = updated.get("long_expiry_ts") or short_expiry
+    short_qty = updated.get("remaining_short_qty") or 0.0
+    long_qty = updated.get("long_remaining_qty")
+    if long_qty is None:
+        long_qty = updated.get("long_fill_amount") or 0.0
+
+    if (short_qty > 1e-12
+            and _leg_expired_for_settlement(short_expiry, now_ms)
+            and _leg_absent_or_zero(actual, short_inst)):
+        updated["remaining_short_qty"] = 0.0
+        ev = {"ts": now_ms, "leg": "short", "instrument": short_inst,
+              "qty_before": short_qty, "qty_after": 0.0,
+              "exchange_position_size": actual.get(short_inst, 0.0),
+              "reason": "SHORT_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
+        _append_settlement_event(updated, ev)
+        events.append(ev)
+        ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)
+
+    if (long_qty > 1e-12
+            and _leg_expired_for_settlement(long_expiry, now_ms)
+            and _leg_absent_or_zero(actual, long_inst)):
+        updated["long_remaining_qty"] = 0.0
+        ev = {"ts": now_ms, "leg": "long", "instrument": long_inst,
+              "qty_before": long_qty, "qty_after": 0.0,
+              "exchange_position_size": actual.get(long_inst, 0.0),
+              "reason": "LONG_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
+        _append_settlement_event(updated, ev)
+        events.append(ev)
+
+    if not events:
+        return {"snap": snap, "changed": False, "events": [],
+                "settlement_state": updated.get("settlement_state") or "NONE",
+                "reason": "NO_SETTLEMENT_CHANGE"}
+    short_now = updated.get("remaining_short_qty") or 0.0
+    long_now = updated.get("long_remaining_qty")
+    if long_now is None:
+        long_now = updated.get("long_fill_amount") or 0.0
+    if short_now <= 1e-12 and long_now <= 1e-12:
+        state = "BOTH_LEGS_SETTLED"
+    elif short_now <= 1e-12:
+        state = "SHORT_SETTLED"
+    else:
+        state = "LONG_SETTLED"
+    updated["settlement_state"] = state
+    return {"snap": updated, "changed": True, "events": events,
+            "settlement_state": state, "reason": "OPTION_SETTLEMENT_RECONCILED"}
+
+
 def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
     """保护腿已成交、短腿未建成时的最小残值快照；复用持仓管理的保护腿回收分支。"""
     locked = locked or {}
@@ -6410,6 +6512,7 @@ def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
         "remaining_short_qty": 0.0,
         "long_remaining_qty": max(0.0, remaining_qty or 0.0),
         "short_expiry_ts": locked.get("short_expiry"),
+        "long_expiry_ts": locked.get("long_expiry") or locked.get("short_expiry"),
         "entry_risk_anchor": None,
         "frozen_ts": now_ms,
         "manual_lineage_only": True,
@@ -6752,6 +6855,21 @@ def startup_recovery_check(currency):
     if read_block:
         _G(_RECOVERY_KEY, read_block)
         return read_block
+    if snap:
+        settlement = _settlement_reconcile_snapshot(snap, opt, _now_ms())
+        if settlement.get("changed"):
+            snap = settlement.get("snap")
+            _G(_POSITION_KEY, snap)
+            short_qty = (snap or {}).get("remaining_short_qty") or 0.0
+            long_qty = (snap or {}).get("long_remaining_qty")
+            if long_qty is None:
+                long_qty = (snap or {}).get("long_fill_amount") or 0.0
+            if short_qty <= 1e-12 and abs(perp_qty or 0.0) > 1e-9:
+                verdict = {"state": "ORPHAN_HEDGE_EMERGENCY",
+                           "reasons": ["SETTLED_OPTION_WITH_PERP_HEDGE"],
+                           "allow_new_open": False}
+                _G(_RECOVERY_KEY, verdict)
+                return verdict
     if (not snap) and _has_entry_progress(prog):
         if _entry_progress_explained_by_positions(locked, prog, opt):
             adopted = _adopt_entry_progress_or_block(
@@ -6779,6 +6897,35 @@ def _evaluate_take_profit(snap, quote_fn=None, now_ms=None):
                 "remaining_budget": None, "price_cap": 0.0, "quote_ok": False,
                 "status": "数据缺口", "quote_gap": "NO_POSITION_SNAPSHOT"}
     rem_qty = snap.get("remaining_short_qty") or 0.0
+    if rem_qty <= 1e-12:
+        dte_h = _dte_hours_to(snap.get("short_expiry_ts"), now_ms if now_ms is not None else _now_ms())
+        ceiling = snap.get("entry_profit_ceiling_net")
+        max_spend = snap.get("max_total_exit_spend")
+        realized = snap.get("realized_exit_spend") or 0.0
+        return {"ratio": None, "qualified": False, "remaining_short_qty": 0.0,
+                "remaining_budget": None, "price_cap": 0.0, "quote_ok": False,
+                "status": "短腿已归零", "quote_gap": None,
+                "capture_qualified": False,
+                "remaining_dte_hours": dte_h,
+                "take_profit_min_dte_hours": TAKE_PROFIT_MIN_DTE_HOURS,
+                "dte_gate_active": False,
+                "dte_gate_reason": None,
+                "entry_profit_ceiling_net": ceiling,
+                "target_profit_amount": snap.get("target_profit_amount"),
+                "target_ratio": snap.get("take_profit_target_ratio") or 0.80,
+                "max_total_exit_spend": max_spend,
+                "realized_exit_spend": realized,
+                "short_buyback_ref": None,
+                "estimated_exit_fee": None,
+                "exit_reserve": None,
+                "short_price_cap": 0.0,
+                "tp_underlying_target_price": None,
+                "tp_underlying_target_method": "data_gap",
+                "tp_target_data_gap": None,
+                "short_mark": None,
+                "short_bid": None,
+                "short_ask": None,
+                "short_delta": None}
     quote = quote_fn or exec_quote
     q = quote(snap.get("short_instrument"))
     quote_ok = bool(q and q.get("mark") is not None and q.get("best_bid") not in (None, 0)
@@ -6937,12 +7084,18 @@ def _evaluate_hedge(snap, quote_fn=None):
     long_qty = (snap or {}).get("long_remaining_qty")
     if long_qty is None:
         long_qty = (snap or {}).get("long_fill_amount") or 0.0
+    settlement_state = (snap or {}).get("settlement_state")
+    settled = settlement_state in ("SHORT_SETTLED", "BOTH_LEGS_SETTLED", "SETTLED")
+    if settled:
+        rem_qty = 0.0
     vcfg = hedge_venue_config(HEDGE_VENUE, HEDGE_BINANCE_INSTRUMENT, HEDGE_BINANCE_EXCHANGE_INDEX)
     state = "SETTLED" if rem_qty <= 0 else "OPEN"
     si, li = (snap or {}).get("short_instrument"), (snap or {}).get("long_instrument")
     quote = quote_fn or exec_quote
-    short_delta = (quote(si) or {}).get("delta") if si else None
-    prot_delta = (quote(li) or {}).get("delta") if li else None
+    short_delta = None if state == "SETTLED" else ((quote(si) or {}).get("delta") if si else None)
+    prot_delta = None if state == "SETTLED" else ((quote(li) or {}).get("delta") if li else None)
+    settlement_orphan = False
+    settlement_reason = None
     hedge_pnl_usd = None
     if vcfg["venue"] == "BINANCE":
         snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
@@ -6968,6 +7121,11 @@ def _evaluate_hedge(snap, quote_fn=None):
                 "instrument": vcfg["instrument"], "venue_cfg": vcfg,
                 "unrealized_pnl_usd": hedge_pnl_usd,
                 "data_gap": "HEDGE_POSITION_DATA_GAP"}
+    sg = settlement_guard(rem_qty, False, state == "SETTLED", perp_qty)
+    if sg.get("target") == 0.0:
+        state = "SETTLED"
+    settlement_orphan = bool(sg.get("orphan"))
+    settlement_reason = sg.get("reason")
     if state == "SETTLED":
         net_opt = 0.0
         target = 0.0
@@ -6995,13 +7153,14 @@ def _evaluate_hedge(snap, quote_fn=None):
         action = {"action": "HEDGE_HOLD", "reduce_only": False, "delta_contracts": 0.0,
                   "blocked": "DIRECTION_INCONSISTENT"}
     return {"perp_qty": perp_qty, "target": target, "action": action,
-            "orphan": hedge_orphan(rem_qty, perp_qty),
+            "orphan": bool(settlement_orphan or hedge_orphan(rem_qty, perp_qty)),
             "side": side,
             "net_delta": struct_delta, "net_option_delta": net_opt,
             "delta_to_trade": delta_to_trade,
             "direction_consistent": consistent,
             "venue": vcfg["venue"], "instrument": vcfg["instrument"], "venue_cfg": vcfg,
-            "unrealized_pnl_usd": hedge_pnl_usd}
+            "unrealized_pnl_usd": hedge_pnl_usd,
+            "settlement_reason": settlement_reason}
 
 
 def _hedge_policy_default_state(position_id=None):
@@ -7833,10 +7992,17 @@ def manage_cycle(now_ms):
     recovery = _recovery_verdict()
     auth = None
     authorized = bool(snap)
+    opt_pos_read_ok = True
     try:
         opt_pos = dbt_get_positions(SETTLEMENT_CURRENCY, "option") or []
     except Exception:
         opt_pos = []
+        opt_pos_read_ok = False
+    if opt_pos_read_ok:
+        settlement = _settlement_reconcile_snapshot(snap, opt_pos, now_ms)
+        if settlement.get("changed"):
+            snap = settlement.get("snap")
+            _G(_POSITION_KEY, snap)
     rec = position_reconcile(snap, opt_pos)        # P0①：快照 vs 交易所（surfaced；不阻断风险收口）
 
     quote_fn = _quote_cache()

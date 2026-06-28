@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.1.4-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.0-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,8 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.1.4-manual-gate"
+STRATEGY_VERSION = "3.2.0-manual-gate"
+SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
 # ===== VRP_CONTEXT 数据源（只检查上下文有效性，不做旧价格门控）=====
@@ -101,18 +102,28 @@ HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性
 HEDGE_BINANCE_PRICE_TICK = 0.1         # BTCUSDC 永续限价价格最小跳动；买入向上、卖出向下取整
 HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
 
-# ===== Binance hedge controller V313 policy (strategy v3.1.4 delivery) =====
+# ===== Binance hedge controller V32 policy (reuses V313 reconciliation) =====
 HEDGE_POLICY_V313_ENABLED = True
 HEDGE_STAGING_ENABLED = True
 HEDGE_HYSTERESIS_ENABLED = True
 HEDGE_COOLDOWN_ENABLED = True
 HEDGE_SLIPPAGE_GUARD_ENABLED = True
-HEDGE_SOFT_INITIAL_RATIO = 0.50
+HEDGE_SOFT_INITIAL_RATIO = 0.40
 HEDGE_SOFT_ADD_DRIFT_STEP = 0.05
 HEDGE_HARD_DRIFT = 0.35
 HEDGE_HARD_CROSS_BPS = 30
 HEDGE_SOFT_CROSS_BPS = 3
 HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA = 1.0
+HEDGE_GAMMA_AWARE_ENABLED = True
+HEDGE_GAMMA_FRAC_FLOOR = 0.30
+HEDGE_GAMMA_NORM_REF = 1_000_000.0
+HEDGE_REBALANCE_BAND_FRAC = 0.20
+HEDGE_MIN_HOLD_SECONDS = 720
+HEDGE_FINAL3H_MODE = "SUPPRESS_SOFT_ADD"
+HEDGE_CRASH_ENABLED = True
+HEDGE_CRASH_SPEED_WINDOW_SECONDS = 600
+HEDGE_CRASH_MOVE_BPS = 110
+HEDGE_MAKER_FIRST_REDUCE_ENABLED = False
 HEDGE_SOFT_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PROB_BUFFER = 0.05
@@ -243,6 +254,24 @@ def validate_config():
         errs.append("HEDGE_OPEN_EXECUTION_STYLE must be PROMPT_LIMIT")
     if not isinstance(HEDGE_MAX_SLIPPAGE_BPS, (int, float)) or isinstance(HEDGE_MAX_SLIPPAGE_BPS, bool) or HEDGE_MAX_SLIPPAGE_BPS < 0:
         errs.append("HEDGE_MAX_SLIPPAGE_BPS must be a non-negative number")
+    if not (0 <= HEDGE_SOFT_INITIAL_RATIO <= 1):
+        errs.append("HEDGE_SOFT_INITIAL_RATIO must be in [0,1]")
+    if not (0 <= HEDGE_GAMMA_FRAC_FLOOR <= 1):
+        errs.append("HEDGE_GAMMA_FRAC_FLOOR must be in [0,1]")
+    if not isinstance(HEDGE_GAMMA_NORM_REF, (int, float)) or isinstance(HEDGE_GAMMA_NORM_REF, bool) or HEDGE_GAMMA_NORM_REF <= 0:
+        errs.append("HEDGE_GAMMA_NORM_REF must be > 0")
+    if not (0 <= HEDGE_REBALANCE_BAND_FRAC <= 1):
+        errs.append("HEDGE_REBALANCE_BAND_FRAC must be in [0,1]")
+    if not isinstance(HEDGE_MIN_HOLD_SECONDS, (int, float)) or isinstance(HEDGE_MIN_HOLD_SECONDS, bool) or HEDGE_MIN_HOLD_SECONDS < 0:
+        errs.append("HEDGE_MIN_HOLD_SECONDS must be >= 0")
+    if HEDGE_FINAL3H_MODE not in ("NORMAL", "SUPPRESS_SOFT_ADD"):
+        errs.append("HEDGE_FINAL3H_MODE must be NORMAL or SUPPRESS_SOFT_ADD")
+    if not isinstance(HEDGE_CRASH_MOVE_BPS, (int, float)) or isinstance(HEDGE_CRASH_MOVE_BPS, bool) or HEDGE_CRASH_MOVE_BPS < 0:
+        errs.append("HEDGE_CRASH_MOVE_BPS must be >= 0")
+    if not isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, (int, float)) or isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, bool) or HEDGE_CRASH_SPEED_WINDOW_SECONDS <= 0:
+        errs.append("HEDGE_CRASH_SPEED_WINDOW_SECONDS must be > 0")
+    if not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool) or not isinstance(HEDGE_CRASH_ENABLED, bool) or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool):
+        errs.append("HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
     required_limits = (
         "max_open_positions",
         "max_short_gamma",
@@ -746,6 +775,7 @@ def build_approval_snapshot(candidate, session_id, manual_context, refresh_seq, 
         "short_strike": candidate.get("short_strike"),
         "long_strike": candidate.get("protection_strike"),
         "short_expiry": candidate.get("short_expiry"),
+        "long_expiry": candidate.get("protection_expiry") or candidate.get("short_expiry"),
         "short_dte_hours": candidate.get("short_dte_hours"),
         "short_delta": candidate.get("short_delta"),
         "breakeven": candidate.get("breakeven"),
@@ -958,6 +988,7 @@ def build_vertical_entry_snapshot(locked, short_fill, long_fill, entry_fees,
         "remaining_short_qty": sa,
         "long_remaining_qty": la,          # 保护腿剩余（回收时递减；持仓真相之一）
         "short_expiry_ts": locked.get("short_expiry"),     # 短腿到期（持仓后 DTE/风险评估用）
+        "long_expiry_ts": locked.get("long_expiry") or locked.get("short_expiry"),
         "entry_risk_anchor": entry_risk_anchor,            # 入场风险锚（风险严重度→仲裁）
         "hedge_trigger_policy": (entry_risk_anchor or {}).get("hedge_trigger_policy"),
         "frozen_ts": now_ts,
@@ -2728,11 +2759,19 @@ def _risk_hedge_table(ctx):
         policy_rows = [
             ["对冲控制器", "state=%s ｜ reason=%s ｜ pending=%s" % (
                 h.get("policy_state") or "—", h.get("policy_reason") or "—", pending),
-             "V313 reconciliation，读交易所仓位为真"],
+             "V32 gamma-aware reconciliation，读交易所仓位为真"],
             ["控制器目标", "full %s ｜ eff %s ｜ current %s ｜ delta %s" % (
                 _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
                 _num(h.get("current_hedge_qty")), _num(h.get("policy_delta_to_trade"))),
              "只按 eff-current 发单"],
+            ["V32 参数", "soft %s ｜ gamma %s/%s ｜ band %s ｜ crash %sbps ｜ hold_until %s" % (
+                _pct1(h.get("soft_ratio")),
+                _pct1(h.get("gamma_fraction")),
+                h.get("gamma_data_state") or "—",
+                _num(h.get("rebalance_deadband")),
+                _num(h.get("crash_adverse_bps")),
+                _num(h.get("min_hold_until"), small=0, big=0)),
+             h.get("final3_mode") or "NORMAL"],
             ["控制器门控", "cross_bps %s ｜ %s ｜ cost_bps %s ｜ warn %s" % (
                 _num(h.get("policy_cross_bps")), cooldown,
                 _num(h.get("episode_cost_bps")), warnings),
@@ -3281,11 +3320,56 @@ def option_net_delta(remaining_short_qty, short_delta, long_remaining_qty=0.0,
     return net
 
 
+def _clamp(value, lo, hi):
+    return max(lo, min(hi, value))
+
+
+def hedge_gamma_fraction(short_gamma, long_gamma, remaining_short_qty,
+                         long_remaining_qty, spot, ref, floor):
+    """Gamma-aware SOFT hedge fraction.
+
+    Missing gamma falls back to floor instead of zero; protection gamma offsets
+    short gamma by current remaining leg quantities.
+    """
+    fl = _clamp(float(floor or 0.0), 0.0, 1.0)
+    if not _is_num(spot) or spot <= 0 or not _is_num(ref) or ref <= 0:
+        return fl
+    combo_gamma = 0.0
+    has_gamma = False
+    if _is_num(short_gamma):
+        combo_gamma += -(remaining_short_qty or 0.0) * short_gamma
+        has_gamma = True
+    if _is_num(long_gamma):
+        combo_gamma += (long_remaining_qty or 0.0) * long_gamma
+        has_gamma = True
+    if not has_gamma:
+        return fl
+    dollar_gamma = abs(combo_gamma) * spot * spot
+    norm = _clamp(dollar_gamma / ref, 0.0, 1.0)
+    return _clamp(fl + (1.0 - fl) * norm, fl, 1.0)
+
+
+def hedge_rebalance_deadband(full_target, min_trade, band_frac):
+    min_qty = max(0.0, min_trade or 0.0)
+    frac = max(0.0, band_frac or 0.0)
+    return max(min_qty, abs(full_target or 0.0) * frac)
+
+
+def hedge_target_ratio_for_soft(base_ratio, gamma_fraction, persisted=False, worsened=False):
+    if persisted or worsened:
+        return 1.0
+    base = _clamp(base_ratio or 0.0, 0.0, 1.0)
+    gamma = _clamp(gamma_fraction or 0.0, 0.0, 1.0)
+    return max(base, gamma)
+
+
 def _round_abs_to_step(value, step):
     if not step or step <= 0:
         return value
     sign = -1.0 if value < 0 else 1.0
-    return sign * round(abs(value) / step) * step
+    units = abs(value) / step
+    rounded_units = int(units + 0.5 + 1e-12)
+    return sign * rounded_units * step
 
 
 def hedge_target_position(net_option_delta, reduction_ratio, spot, contract_size,
@@ -4531,10 +4615,10 @@ def feasibility_penalty(score_norm, floor=0.50):
 """
 Post-entry hedge risk evaluator.
 
-The module is deliberately pure: it produces PositionRiskPackage and optional
-dry-run HedgeIntentPackage, but it never places orders or mutates the option
-ledger. It uses EDB as the aggregate manual input and keeps GGR as a boundary
-and persistence modifier, not as a probability predictor.
+The module is deliberately pure: it produces PositionRiskPackage only. Active
+hedge sizing and order intent are owned by the strategy-layer hedge controller,
+so this module never places orders, mutates the option ledger, or emits dry-run
+hedge instructions.
 """
 import math
 
@@ -4550,17 +4634,12 @@ STATE_HEDGE_READY = "HEDGE_READY"
 STATE_HEDGE_ACTIVE = "HEDGE_ACTIVE"
 STATE_MANUAL_REVIEW = "MANUAL_REVIEW"
 
-EXECUTION_DRY_INTENT_ONLY = "DRY_INTENT_ONLY"
-
 PERSISTENCE_LOW = "LOW"
 PERSISTENCE_MEDIUM = "MEDIUM"
 PERSISTENCE_HIGH = "HIGH"
 
 SIDE_SHORT_CALL = "SHORT_CALL"
 SIDE_SHORT_PUT = "SHORT_PUT"
-
-BUY_HEDGE = "BUY_FUTURE_OR_PERP"
-SELL_HEDGE = "SELL_FUTURE_OR_PERP"
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -4869,39 +4948,6 @@ def exit_vs_hedge_friction(exit_friction):
     }
 
 
-def _hedge_side(direction_bias):
-    return BUY_HEDGE if _is_short_call(direction_bias) else SELL_HEDGE
-
-
-def _hedge_size_mode(probability_now, drift, tail_acceleration,
-                     persistence, breached):
-    if breached or probability_now >= 0.80:
-        return "FULL", 0.90
-    if tail_acceleration == PERSISTENCE_HIGH and persistence == PERSISTENCE_HIGH:
-        return "FULL", 0.90
-    if probability_now >= 0.60 or drift >= 0.25 or persistence == PERSISTENCE_HIGH:
-        return "MEDIUM", 0.60
-    return "LIGHT", 0.30
-
-
-def _make_hedge_intent(position_id, direction_bias, probability_now, drift,
-                       tail_acceleration, persistence, breached):
-    mode, ratio = _hedge_size_mode(
-        probability_now, drift, tail_acceleration, persistence, breached)
-    return {
-        "schema_name": "HedgeIntentPackage",
-        "schema_version": "nrd.integration.hedge_intent.v0.1",
-        "position_id": position_id,
-        "hedge_side": _hedge_side(direction_bias),
-        "hedge_size_mode": mode,
-        "target_delta_reduction_ratio": ratio,
-        "hedge_instrument": "BTC-PERPETUAL",
-        "hedge_venue": "DERIBIT",
-        "execution_mode": EXECUTION_DRY_INTENT_ONLY,
-        "reason_codes": ["DRY_INTENT_ONLY", "TAIL_RISK_HEDGE_READY"],
-    }
-
-
 def _manual_review_package(position_id, entry_anchor, reason):
     return {
         "schema_name": SCHEMA_NAME,
@@ -4944,13 +4990,6 @@ def evaluate_position_risk(position_id, direction_bias, entry_risk_anchor,
     trigger = evaluate_hedge_trigger(
         direction_bias, entry_risk_anchor, current_price, p_now, policy)
     state = trigger["tail_risk_state"]
-    hedge_intent = None
-    if state == STATE_HEDGE_READY:
-        hedge_intent = _make_hedge_intent(
-            position_id, direction_bias, p_now,
-            trigger["current_risk"]["touch_probability_drift"],
-            PERSISTENCE_LOW, PERSISTENCE_LOW,
-            "BOUNDARY_BREACHED" in trigger["reason_codes"])
 
     return {
         "schema_name": SCHEMA_NAME,
@@ -4962,7 +5001,7 @@ def evaluate_position_risk(position_id, direction_bias, entry_risk_anchor,
         "price_line_touched": trigger["price_line_touched"],
         "exit_vs_hedge_friction": exit_vs_hedge_friction(exit_friction),
         "tail_risk_state": state,
-        "hedge_intent": hedge_intent,
+        "hedge_intent": None,
         "reason_codes": trigger["reason_codes"],
     }
 
@@ -6382,6 +6421,105 @@ def _append_execution_history(snap, key, item, now_ms):
     return snap
 
 
+def _settlement_is_num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _option_position_map(option_positions):
+    actual = {}
+    for p in option_positions or []:
+        inst = (p or {}).get("instrument_name") or (p or {}).get("instrument")
+        if not inst:
+            continue
+        raw_size = (p or {}).get("size")
+        if raw_size is None:
+            raw_size = (p or {}).get("amount")
+        try:
+            size = float(raw_size or 0.0)
+        except Exception:
+            size = 0.0
+        actual[inst] = actual.get(inst, 0.0) + size
+    return actual
+
+
+def _leg_expired_for_settlement(expiry_ts, now_ms):
+    return (_settlement_is_num(expiry_ts) and _settlement_is_num(now_ms)
+            and now_ms >= expiry_ts + SETTLEMENT_RECONCILE_GRACE_MS)
+
+
+def _leg_absent_or_zero(actual, inst):
+    if not inst:
+        return False
+    return abs(actual.get(inst, 0.0) or 0.0) <= 1e-9
+
+
+def _append_settlement_event(snap, event):
+    rec = dict(event or {})
+    rec.setdefault("settlement_pnl_ccy", None)
+    rec.setdefault("settlement_pnl_status", "NOT_COMPUTED")
+    hist = list((snap or {}).get("option_settlement_history") or [])
+    hist.append(rec)
+    snap["option_settlement_history"] = hist[-50:]
+
+
+def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
+    if not snap:
+        return {"snap": snap, "changed": False, "events": [],
+                "settlement_state": "NONE", "reason": "NO_POSITION_SNAPSHOT"}
+    actual = _option_position_map(option_positions)
+    updated = dict(snap)
+    events = []
+    short_inst = updated.get("short_instrument")
+    long_inst = updated.get("long_instrument")
+    short_expiry = updated.get("short_expiry_ts")
+    long_expiry = updated.get("long_expiry_ts") or short_expiry
+    short_qty = updated.get("remaining_short_qty") or 0.0
+    long_qty = updated.get("long_remaining_qty")
+    if long_qty is None:
+        long_qty = updated.get("long_fill_amount") or 0.0
+
+    if (short_qty > 1e-12
+            and _leg_expired_for_settlement(short_expiry, now_ms)
+            and _leg_absent_or_zero(actual, short_inst)):
+        updated["remaining_short_qty"] = 0.0
+        ev = {"ts": now_ms, "leg": "short", "instrument": short_inst,
+              "qty_before": short_qty, "qty_after": 0.0,
+              "exchange_position_size": actual.get(short_inst, 0.0),
+              "reason": "SHORT_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
+        _append_settlement_event(updated, ev)
+        events.append(ev)
+        ledger_set_state(S_SHORT_FLAT_LONG_RESIDUAL)
+
+    if (long_qty > 1e-12
+            and _leg_expired_for_settlement(long_expiry, now_ms)
+            and _leg_absent_or_zero(actual, long_inst)):
+        updated["long_remaining_qty"] = 0.0
+        ev = {"ts": now_ms, "leg": "long", "instrument": long_inst,
+              "qty_before": long_qty, "qty_after": 0.0,
+              "exchange_position_size": actual.get(long_inst, 0.0),
+              "reason": "LONG_OPTION_SETTLED_ABSENT_ON_EXCHANGE"}
+        _append_settlement_event(updated, ev)
+        events.append(ev)
+
+    if not events:
+        return {"snap": snap, "changed": False, "events": [],
+                "settlement_state": updated.get("settlement_state") or "NONE",
+                "reason": "NO_SETTLEMENT_CHANGE"}
+    short_now = updated.get("remaining_short_qty") or 0.0
+    long_now = updated.get("long_remaining_qty")
+    if long_now is None:
+        long_now = updated.get("long_fill_amount") or 0.0
+    if short_now <= 1e-12 and long_now <= 1e-12:
+        state = "BOTH_LEGS_SETTLED"
+    elif short_now <= 1e-12:
+        state = "SHORT_SETTLED"
+    else:
+        state = "LONG_SETTLED"
+    updated["settlement_state"] = state
+    return {"snap": updated, "changed": True, "events": events,
+            "settlement_state": state, "reason": "OPTION_SETTLEMENT_RECONCILED"}
+
+
 def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
     """保护腿已成交、短腿未建成时的最小残值快照；复用持仓管理的保护腿回收分支。"""
     locked = locked or {}
@@ -6410,6 +6548,7 @@ def _build_protection_residual_snapshot(locked, prog, remaining_qty, now_ms):
         "remaining_short_qty": 0.0,
         "long_remaining_qty": max(0.0, remaining_qty or 0.0),
         "short_expiry_ts": locked.get("short_expiry"),
+        "long_expiry_ts": locked.get("long_expiry") or locked.get("short_expiry"),
         "entry_risk_anchor": None,
         "frozen_ts": now_ms,
         "manual_lineage_only": True,
@@ -6752,6 +6891,21 @@ def startup_recovery_check(currency):
     if read_block:
         _G(_RECOVERY_KEY, read_block)
         return read_block
+    if snap:
+        settlement = _settlement_reconcile_snapshot(snap, opt, _now_ms())
+        if settlement.get("changed"):
+            snap = settlement.get("snap")
+            _G(_POSITION_KEY, snap)
+            short_qty = (snap or {}).get("remaining_short_qty") or 0.0
+            long_qty = (snap or {}).get("long_remaining_qty")
+            if long_qty is None:
+                long_qty = (snap or {}).get("long_fill_amount") or 0.0
+            if short_qty <= 1e-12 and abs(perp_qty or 0.0) > 1e-9:
+                verdict = {"state": "ORPHAN_HEDGE_EMERGENCY",
+                           "reasons": ["SETTLED_OPTION_WITH_PERP_HEDGE"],
+                           "allow_new_open": False}
+                _G(_RECOVERY_KEY, verdict)
+                return verdict
     if (not snap) and _has_entry_progress(prog):
         if _entry_progress_explained_by_positions(locked, prog, opt):
             adopted = _adopt_entry_progress_or_block(
@@ -6779,6 +6933,35 @@ def _evaluate_take_profit(snap, quote_fn=None, now_ms=None):
                 "remaining_budget": None, "price_cap": 0.0, "quote_ok": False,
                 "status": "数据缺口", "quote_gap": "NO_POSITION_SNAPSHOT"}
     rem_qty = snap.get("remaining_short_qty") or 0.0
+    if rem_qty <= 1e-12:
+        dte_h = _dte_hours_to(snap.get("short_expiry_ts"), now_ms if now_ms is not None else _now_ms())
+        ceiling = snap.get("entry_profit_ceiling_net")
+        max_spend = snap.get("max_total_exit_spend")
+        realized = snap.get("realized_exit_spend") or 0.0
+        return {"ratio": None, "qualified": False, "remaining_short_qty": 0.0,
+                "remaining_budget": None, "price_cap": 0.0, "quote_ok": False,
+                "status": "短腿已归零", "quote_gap": None,
+                "capture_qualified": False,
+                "remaining_dte_hours": dte_h,
+                "take_profit_min_dte_hours": TAKE_PROFIT_MIN_DTE_HOURS,
+                "dte_gate_active": False,
+                "dte_gate_reason": None,
+                "entry_profit_ceiling_net": ceiling,
+                "target_profit_amount": snap.get("target_profit_amount"),
+                "target_ratio": snap.get("take_profit_target_ratio") or 0.80,
+                "max_total_exit_spend": max_spend,
+                "realized_exit_spend": realized,
+                "short_buyback_ref": None,
+                "estimated_exit_fee": None,
+                "exit_reserve": None,
+                "short_price_cap": 0.0,
+                "tp_underlying_target_price": None,
+                "tp_underlying_target_method": "data_gap",
+                "tp_target_data_gap": None,
+                "short_mark": None,
+                "short_bid": None,
+                "short_ask": None,
+                "short_delta": None}
     quote = quote_fn or exec_quote
     q = quote(snap.get("short_instrument"))
     quote_ok = bool(q and q.get("mark") is not None and q.get("best_bid") not in (None, 0)
@@ -6937,12 +7120,24 @@ def _evaluate_hedge(snap, quote_fn=None):
     long_qty = (snap or {}).get("long_remaining_qty")
     if long_qty is None:
         long_qty = (snap or {}).get("long_fill_amount") or 0.0
+    settlement_state = (snap or {}).get("settlement_state")
+    settled = settlement_state in ("SHORT_SETTLED", "BOTH_LEGS_SETTLED", "SETTLED")
+    if settled:
+        rem_qty = 0.0
     vcfg = hedge_venue_config(HEDGE_VENUE, HEDGE_BINANCE_INSTRUMENT, HEDGE_BINANCE_EXCHANGE_INDEX)
     state = "SETTLED" if rem_qty <= 0 else "OPEN"
     si, li = (snap or {}).get("short_instrument"), (snap or {}).get("long_instrument")
     quote = quote_fn or exec_quote
-    short_delta = (quote(si) or {}).get("delta") if si else None
-    prot_delta = (quote(li) or {}).get("delta") if li else None
+    sq = {} if state == "SETTLED" or not si else (quote(si) or {})
+    lq = {} if state == "SETTLED" or not li else (quote(li) or {})
+    short_delta = None if state == "SETTLED" else sq.get("delta")
+    prot_delta = None if state == "SETTLED" else lq.get("delta")
+    short_gamma = None if state == "SETTLED" else sq.get("gamma")
+    prot_gamma = None if state == "SETTLED" else lq.get("gamma")
+    gamma_fraction = None
+    gamma_data_state = None
+    settlement_orphan = False
+    settlement_reason = None
     hedge_pnl_usd = None
     if vcfg["venue"] == "BINANCE":
         snap_bnc = bnc_get_position_snapshot(vcfg["instrument"])
@@ -6966,8 +7161,15 @@ def _evaluate_hedge(snap, quote_fn=None):
                 "net_delta": None, "net_option_delta": None,
                 "direction_consistent": True, "venue": vcfg["venue"],
                 "instrument": vcfg["instrument"], "venue_cfg": vcfg,
+                "short_gamma": short_gamma, "protection_gamma": prot_gamma,
+                "gamma_fraction": gamma_fraction, "gamma_data_state": gamma_data_state,
                 "unrealized_pnl_usd": hedge_pnl_usd,
                 "data_gap": "HEDGE_POSITION_DATA_GAP"}
+    sg = settlement_guard(rem_qty, False, state == "SETTLED", perp_qty)
+    if sg.get("target") == 0.0:
+        state = "SETTLED"
+    settlement_orphan = bool(sg.get("orphan"))
+    settlement_reason = sg.get("reason")
     if state == "SETTLED":
         net_opt = 0.0
         target = 0.0
@@ -6980,12 +7182,22 @@ def _evaluate_hedge(snap, quote_fn=None):
                 "net_delta": None, "net_option_delta": None,
                 "direction_consistent": True, "venue": vcfg["venue"],
                 "instrument": vcfg["instrument"], "venue_cfg": vcfg,
+                "short_gamma": short_gamma, "protection_gamma": prot_gamma,
+                "gamma_fraction": gamma_fraction, "gamma_data_state": gamma_data_state,
                 "unrealized_pnl_usd": hedge_pnl_usd,
                 "data_gap": "HEDGE_DELTA_DATA_GAP"}
     else:
         net_opt = option_net_delta(rem_qty, short_delta, long_qty, prot_delta)
-        target = hedge_target_position(net_opt, HEDGE_REDUCTION_RATIO, _spot_price(),
+        spot = _spot_price()
+        target_ratio = 1.0 if HEDGE_GAMMA_AWARE_ENABLED else HEDGE_REDUCTION_RATIO
+        target = hedge_target_position(net_opt, target_ratio, spot,
                                        contract_size, min_trade, linear=vcfg["linear"])
+        if HEDGE_GAMMA_AWARE_ENABLED:
+            gamma_fraction = hedge_gamma_fraction(
+                short_gamma, prot_gamma, rem_qty, long_qty, spot,
+                HEDGE_GAMMA_NORM_REF, HEDGE_GAMMA_FRAC_FLOOR)
+            gamma_data_state = ("OK" if isinstance(short_gamma, (int, float))
+                                and not isinstance(short_gamma, bool) else "GAMMA_DATA_FLOOR")
     action = hedge_order_action(perp_qty, target, min_trade)
     delta_to_trade = (target or 0.0) - (perp_qty or 0.0)
     side = "buy" if delta_to_trade > 0 else ("sell" if delta_to_trade < 0 else hedge_side((snap or {}).get("side")))
@@ -6995,18 +7207,22 @@ def _evaluate_hedge(snap, quote_fn=None):
         action = {"action": "HEDGE_HOLD", "reduce_only": False, "delta_contracts": 0.0,
                   "blocked": "DIRECTION_INCONSISTENT"}
     return {"perp_qty": perp_qty, "target": target, "action": action,
-            "orphan": hedge_orphan(rem_qty, perp_qty),
+            "orphan": bool(settlement_orphan or hedge_orphan(rem_qty, perp_qty)),
             "side": side,
             "net_delta": struct_delta, "net_option_delta": net_opt,
             "delta_to_trade": delta_to_trade,
             "direction_consistent": consistent,
             "venue": vcfg["venue"], "instrument": vcfg["instrument"], "venue_cfg": vcfg,
-            "unrealized_pnl_usd": hedge_pnl_usd}
+            "short_gamma": short_gamma, "protection_gamma": prot_gamma,
+            "gamma_fraction": gamma_fraction, "gamma_data_state": gamma_data_state,
+            "target_semantics": ("RAW_FULL_DELTA" if HEDGE_GAMMA_AWARE_ENABLED else "V313_REDUCTION_RATIO"),
+            "unrealized_pnl_usd": hedge_pnl_usd,
+            "settlement_reason": settlement_reason}
 
 
 def _hedge_policy_default_state(position_id=None):
     return {
-        "policy": "V313",
+        "policy": "V32",
         "position_id": position_id,
         "hedge_epoch": 0,
         "full_target_qty": 0.0,
@@ -7029,6 +7245,9 @@ def _hedge_policy_default_state(position_id=None):
         "last_trigger_state": "NONE",
         "last_p_now": None,
         "last_drift": None,
+        "crash_ref_price": None,
+        "crash_ref_ts": 0,
+        "last_crash_adverse_bps": 0.0,
         "episode_cost_usdc": 0.0,
         "episode_cost_bps": 0.0,
     }
@@ -7086,10 +7305,12 @@ def _hedge_policy_order_active(order):
 
 def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
                          eff_target, current, delta, action, cross_bps,
-                         warnings=None, wants_action=False):
+                         warnings=None, wants_action=False,
+                         soft_ratio=None, rebalance_deadband=None,
+                         min_hold_until=None, crash_adverse_bps=None):
     cr = (risk or {}).get("current_risk") or {}
     detail = {
-        "policy": "V313",
+        "policy": "V32",
         "position_id": st.get("position_id"),
         "state": trigger_state,
         "trigger_state": trigger_state,
@@ -7104,6 +7325,14 @@ def _hedge_policy_detail(st, hedge, risk, trigger_state, reason, full_target,
         "pending_order_qty": st.get("pending_order_qty"),
         "pending_order_created_ts": st.get("pending_order_created_ts"),
         "cross_bps": cross_bps,
+        "soft_ratio": soft_ratio,
+        "gamma_fraction": (hedge or {}).get("gamma_fraction"),
+        "gamma_data_state": (hedge or {}).get("gamma_data_state"),
+        "rebalance_deadband": rebalance_deadband,
+        "final3_mode": HEDGE_FINAL3H_MODE,
+        "crash_adverse_bps": crash_adverse_bps,
+        "min_hold_until": min_hold_until,
+        "target_semantics": (hedge or {}).get("target_semantics"),
         "soft_since_ts": st.get("soft_since_ts") or 0,
         "reduce_since_ts": st.get("reduce_since_ts") or 0,
         "add_cooldown_until": st.get("add_cooldown_until") or 0,
@@ -7257,12 +7486,60 @@ def _hedge_policy_trigger_state(risk):
     return "SOFT" if soft else "NONE"
 
 
-def _hedge_policy_action(current, eff_target, min_trade, forced_reason=None):
+def _hedge_policy_current_price(risk):
+    cr = (risk or {}).get("current_risk") or {}
+    inp = (risk or {}).get("display_inputs") or {}
+    for value in (cr.get("current_price"), inp.get("current_price")):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return float(value)
+    return None
+
+
+def _hedge_policy_adverse_bps(side, ref_price, current_price):
+    if not (isinstance(ref_price, (int, float)) and isinstance(current_price, (int, float))):
+        return 0.0
+    if ref_price <= 0 or current_price <= 0:
+        return 0.0
+    s = str(side or "").upper()
+    if s in ("CALL", "SHORT_CALL"):
+        return max(0.0, (current_price - ref_price) / ref_price * 10000.0)
+    if s in ("PUT", "SHORT_PUT"):
+        return max(0.0, (ref_price - current_price) / ref_price * 10000.0)
+    return 0.0
+
+
+def _hedge_policy_crash_trigger(st, snap, risk, now_ms):
+    price = _hedge_policy_current_price(risk)
+    if not HEDGE_CRASH_ENABLED or price is None:
+        st["last_crash_adverse_bps"] = 0.0
+        return False
+    window_ms = max(1, HEDGE_CRASH_SPEED_WINDOW_SECONDS) * 1000
+    ref_price = st.get("crash_ref_price")
+    ref_ts = st.get("crash_ref_ts") or 0
+    if not isinstance(ref_price, (int, float)) or now_ms - ref_ts > window_ms:
+        st["crash_ref_price"] = price
+        st["crash_ref_ts"] = now_ms
+        st["last_crash_adverse_bps"] = 0.0
+        return False
+    adverse_bps = _hedge_policy_adverse_bps((snap or {}).get("side"), ref_price, price)
+    st["last_crash_adverse_bps"] = adverse_bps
+    return adverse_bps >= HEDGE_CRASH_MOVE_BPS
+
+
+def _hedge_policy_in_final3h(snap, now_ms):
+    dte_h = _dte_hours_to((snap or {}).get("short_expiry_ts"), now_ms)
+    return dte_h is not None and dte_h <= TAKE_PROFIT_MIN_DTE_HOURS + 1e-12
+
+
+def _hedge_policy_action(current, eff_target, min_trade, forced_reason=None, deadband=None):
     delta = (eff_target or 0.0) - (current or 0.0)
     side = "buy" if delta > 0 else ("sell" if delta < 0 else None)
-    if abs(delta) < max(min_trade, 0.0):
+    forced_unwind = forced_reason in ("ORPHAN_HEDGE_UNWIND", "REVERSE_HEDGE_UNWIND")
+    threshold = max(min_trade, 0.0) if forced_unwind else max(min_trade, deadband or 0.0)
+    if abs(delta) < threshold:
+        reason = "TARGET_BAND_DEADBAND" if threshold > max(min_trade, 0.0) else "LOT_DEADBAND"
         return {"action": "HEDGE_HOLD", "reduce_only": False,
-                "delta_contracts": 0.0, "blocked": "LOT_DEADBAND"}, 0.0, None, False
+                "delta_contracts": 0.0, "blocked": reason}, 0.0, None, False
     reducing = abs(eff_target or 0.0) < abs(current or 0.0)
     reduce_only = bool(reducing)
     if abs(eff_target or 0.0) <= 1e-12:
@@ -7306,9 +7583,16 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
         return _hedge_policy_hold(out, st, risk, "HOLD", out.get("data_gap") or "TARGET_DATA_GAP",
                                   None, None, current)
     full_target = float(full_target or 0.0)
+    rebalance_deadband = hedge_rebalance_deadband(
+        full_target, min_trade, HEDGE_REBALANCE_BAND_FRAC)
+    soft_ratio = None
+    min_hold_until = None
     rem_short = (snap or {}).get("remaining_short_qty") or 0.0
     forced_reason = None
     trigger_state = _hedge_policy_trigger_state(risk)
+    if _hedge_policy_crash_trigger(st, snap, risk, now_ms):
+        trigger_state = "CRASH"
+    crash_adverse_bps = st.get("last_crash_adverse_bps") or 0.0
     cr = (risk or {}).get("current_risk") or {}
     p_now = cr.get("touch_probability_now")
     drift = cr.get("touch_probability_drift")
@@ -7325,9 +7609,9 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
         eff_target = 0.0
         forced_reason = "REVERSE_HEDGE_UNWIND"
         trigger_state = "HARD"
-    elif trigger_state == "HARD":
+    elif trigger_state in ("HARD", "CRASH"):
         eff_target = full_target
-        forced_reason = "HARD_TRIGGER_EMERGENCY"
+        forced_reason = "CRASH_TRIGGER_SPEED" if trigger_state == "CRASH" else "HARD_TRIGGER_EMERGENCY"
     elif trigger_state == "SOFT":
         if HEDGE_STAGING_ENABLED:
             if not st.get("soft_since_ts"):
@@ -7336,12 +7620,17 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
             last_p = st.get("last_p_now")
             worsened = (isinstance(p_now, (int, float)) and isinstance(last_p, (int, float))
                         and p_now - last_p >= HEDGE_SOFT_ADD_DRIFT_STEP)
-            ratio = 1.0 if (persisted or worsened) else HEDGE_SOFT_INITIAL_RATIO
-            eff_target = full_target * ratio
-            forced_reason = "SOFT_TRIGGER_CONFIRMED" if ratio >= 1.0 else "SOFT_TRIGGER_INITIAL"
+            gamma_frac = out.get("gamma_fraction")
+            if not isinstance(gamma_frac, (int, float)) or isinstance(gamma_frac, bool):
+                gamma_frac = HEDGE_GAMMA_FRAC_FLOOR
+            soft_ratio = hedge_target_ratio_for_soft(
+                HEDGE_SOFT_INITIAL_RATIO, gamma_frac, persisted, worsened)
+            eff_target = full_target * soft_ratio
+            forced_reason = "SOFT_TRIGGER_CONFIRMED" if soft_ratio >= 1.0 else "SOFT_TRIGGER_INITIAL"
         else:
             eff_target = full_target
             forced_reason = "SOFT_TRIGGER_CONFIRMED"
+            soft_ratio = 1.0
     else:
         st["soft_since_ts"] = 0
         watch = cr.get("watch_probability")
@@ -7371,17 +7660,41 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
             forced_reason = "NO_TRIGGER" if abs(current) < min_trade else "HOLD_EXISTING"
             trigger_state = "NONE"
 
-    action, delta, side, wants = _hedge_policy_action(current, eff_target, min_trade, forced_reason)
+    action, delta, side, wants = _hedge_policy_action(
+        current, eff_target, min_trade, forced_reason, rebalance_deadband)
     reason = action.get("blocked") or forced_reason or "NO_TRIGGER"
     is_add = wants and not action.get("reduce_only")
     is_reduce = wants and action.get("reduce_only")
-    if is_add and trigger_state != "HARD" and HEDGE_COOLDOWN_ENABLED \
+    if is_reduce and forced_reason not in ("ORPHAN_HEDGE_UNWIND", "REVERSE_HEDGE_UNWIND") \
+            and HEDGE_MIN_HOLD_SECONDS > 0 and st.get("last_action") == "ADD":
+        last_fill_ts = st.get("last_fill_ts") or 0
+        if last_fill_ts:
+            min_hold_until = last_fill_ts + HEDGE_MIN_HOLD_SECONDS * 1000
+            if now_ms < min_hold_until:
+                action = {"action": "HEDGE_HOLD", "reduce_only": False,
+                          "delta_contracts": 0.0, "blocked": "REDUCE_MIN_HOLD_ACTIVE"}
+                delta = 0.0
+                side = None
+                wants = False
+                is_reduce = False
+                reason = "REDUCE_MIN_HOLD_ACTIVE"
+    if is_add and trigger_state == "SOFT" and HEDGE_FINAL3H_MODE == "SUPPRESS_SOFT_ADD" \
+            and _hedge_policy_in_final3h(snap, now_ms):
+        action = {"action": "HEDGE_HOLD", "reduce_only": False,
+                  "delta_contracts": 0.0, "blocked": "FINAL3H_SOFT_ADD_SUPPRESSED"}
+        delta = 0.0
+        side = None
+        wants = False
+        is_add = False
+        reason = "FINAL3H_SOFT_ADD_SUPPRESSED"
+    if is_add and trigger_state not in ("HARD", "CRASH") and HEDGE_COOLDOWN_ENABLED \
             and (st.get("add_cooldown_until") or 0) > now_ms:
         action = {"action": "HEDGE_HOLD", "reduce_only": False,
                   "delta_contracts": 0.0, "blocked": "ADD_COOLDOWN_ACTIVE"}
         delta = 0.0
         side = None
         wants = False
+        is_add = False
         reason = "ADD_COOLDOWN_ACTIVE"
     if is_reduce and forced_reason not in ("ORPHAN_HEDGE_UNWIND", "REVERSE_HEDGE_UNWIND") \
             and HEDGE_COOLDOWN_ENABLED and (st.get("reduce_cooldown_until") or 0) > now_ms:
@@ -7390,10 +7703,11 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
         delta = 0.0
         side = None
         wants = False
+        is_reduce = False
         reason = "REDUCE_COOLDOWN_ACTIVE"
     if (st.get("episode_cost_bps") or 0.0) > HEDGE_EPISODE_COST_ALERT_BPS:
         warnings.append("EPISODE_COST_ALERT")
-    cross_bps = HEDGE_HARD_CROSS_BPS if trigger_state == "HARD" else HEDGE_SOFT_CROSS_BPS
+    cross_bps = HEDGE_HARD_CROSS_BPS if trigger_state in ("HARD", "CRASH") else HEDGE_SOFT_CROSS_BPS
     out["action"] = action
     if side:
         out["side"] = side
@@ -7407,7 +7721,9 @@ def _hedge_policy_plan(snap, hedge, risk, now_ms):
     _hedge_policy_save_state(st)
     out["policy_detail"] = _hedge_policy_detail(
         st, out, risk, trigger_state, reason, full_target, eff_target,
-        current, delta, action, cross_bps, warnings, wants_action=wants)
+        current, delta, action, cross_bps, warnings, wants_action=wants,
+        soft_ratio=soft_ratio, rebalance_deadband=rebalance_deadband,
+        min_hold_until=min_hold_until, crash_adverse_bps=crash_adverse_bps)
     return out
 
 
@@ -7740,6 +8056,14 @@ def _build_hedge_detail(hedge, risk):
             "eff_target_qty": hp.get("eff_target_qty"),
             "current_hedge_qty": hp.get("current_hedge_qty"),
             "policy_delta_to_trade": hp.get("delta_to_trade"),
+            "soft_ratio": hp.get("soft_ratio"),
+            "gamma_fraction": hp.get("gamma_fraction"),
+            "gamma_data_state": hp.get("gamma_data_state"),
+            "rebalance_deadband": hp.get("rebalance_deadband"),
+            "final3_mode": hp.get("final3_mode"),
+            "crash_adverse_bps": hp.get("crash_adverse_bps"),
+            "min_hold_until": hp.get("min_hold_until"),
+            "target_semantics": hp.get("target_semantics"),
             "pending_order_id": hp.get("pending_order_id"),
             "pending_order_side": hp.get("pending_order_side"),
             "pending_order_qty": hp.get("pending_order_qty"),
@@ -7833,10 +8157,17 @@ def manage_cycle(now_ms):
     recovery = _recovery_verdict()
     auth = None
     authorized = bool(snap)
+    opt_pos_read_ok = True
     try:
         opt_pos = dbt_get_positions(SETTLEMENT_CURRENCY, "option") or []
     except Exception:
         opt_pos = []
+        opt_pos_read_ok = False
+    if opt_pos_read_ok:
+        settlement = _settlement_reconcile_snapshot(snap, opt_pos, now_ms)
+        if settlement.get("changed"):
+            snap = settlement.get("snap")
+            _G(_POSITION_KEY, snap)
     rec = position_reconcile(snap, opt_pos)        # P0①：快照 vs 交易所（surfaced；不阻断风险收口）
 
     quote_fn = _quote_cache()

@@ -543,8 +543,8 @@ def test_near_expiry_take_profit_gate_does_not_block_risk_hedge_fallback():
         }
         ST._evaluate_position_risk_now = lambda *_a, **_k: {
             "tail_risk_state": ST.STATE_HEDGE_READY,
-            "current_risk": {"touch_probability_now": 0.62},
-            "reason_codes": ["TOUCH_PROBABILITY_DETERIORATED"],
+            "current_risk": {"touch_probability_now": 0.82, "emergency_probability": 0.70},
+            "reason_codes": ["EMERGENCY_TOUCH_PROBABILITY"],
         }
         ST._risk_exit_budget_cap = lambda *_a, **_k: {
             "remaining_budget": 0.001, "price_cap": 0.0, "within": False,

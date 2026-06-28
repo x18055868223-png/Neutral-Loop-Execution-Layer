@@ -140,7 +140,8 @@ def test_strategy_hedge_target_uses_binance_actual_leg_quantities():
     h = ST._evaluate_hedge(snap, lambda inst: q.get(inst, {}))
     assert h["venue"] == "BINANCE" and h["side"] == "buy"
     assert abs(h["net_option_delta"] - (-0.0075)) < 1e-12
-    assert abs(h["target"] - 0.004) < 1e-12
+    assert abs(h["target"] - 0.008) < 1e-12
+    assert h["target_semantics"] == "RAW_FULL_DELTA"
     assert h["action"]["action"] == "HEDGE_OPEN"
     assert "maker_only" not in h["venue_cfg"]
     _restore()

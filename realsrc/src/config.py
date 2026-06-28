@@ -9,7 +9,8 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.1.4-manual-gate"
+STRATEGY_VERSION = "3.2.0-manual-gate"
+SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
 # ===== VRP_CONTEXT 数据源（只检查上下文有效性，不做旧价格门控）=====
@@ -95,18 +96,28 @@ HEDGE_BINANCE_MIN_TRADE = 0.001        # 币安 BTCUSDC 最小下单(BTC, 线性
 HEDGE_BINANCE_PRICE_TICK = 0.1         # BTCUSDC 永续限价价格最小跳动；买入向上、卖出向下取整
 HEDGE_BINANCE_EXCHANGE_INDEX = 1       # FMZ exchanges[] 下标：exchanges[0]=Deribit, [1]=Binance Futures
 
-# ===== Binance hedge controller V313 policy (strategy v3.1.4 delivery) =====
+# ===== Binance hedge controller V32 policy (reuses V313 reconciliation) =====
 HEDGE_POLICY_V313_ENABLED = True
 HEDGE_STAGING_ENABLED = True
 HEDGE_HYSTERESIS_ENABLED = True
 HEDGE_COOLDOWN_ENABLED = True
 HEDGE_SLIPPAGE_GUARD_ENABLED = True
-HEDGE_SOFT_INITIAL_RATIO = 0.50
+HEDGE_SOFT_INITIAL_RATIO = 0.40
 HEDGE_SOFT_ADD_DRIFT_STEP = 0.05
 HEDGE_HARD_DRIFT = 0.35
 HEDGE_HARD_CROSS_BPS = 30
 HEDGE_SOFT_CROSS_BPS = 3
 HEDGE_LOSS_BOUNDARY_BUFFER_SIGMA = 1.0
+HEDGE_GAMMA_AWARE_ENABLED = True
+HEDGE_GAMMA_FRAC_FLOOR = 0.30
+HEDGE_GAMMA_NORM_REF = 1_000_000.0
+HEDGE_REBALANCE_BAND_FRAC = 0.20
+HEDGE_MIN_HOLD_SECONDS = 720
+HEDGE_FINAL3H_MODE = "SUPPRESS_SOFT_ADD"
+HEDGE_CRASH_ENABLED = True
+HEDGE_CRASH_SPEED_WINDOW_SECONDS = 600
+HEDGE_CRASH_MOVE_BPS = 110
+HEDGE_MAKER_FIRST_REDUCE_ENABLED = False
 HEDGE_SOFT_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PERSIST_SECONDS = 20
 HEDGE_REDUCE_PROB_BUFFER = 0.05
@@ -237,6 +248,24 @@ def validate_config():
         errs.append("HEDGE_OPEN_EXECUTION_STYLE must be PROMPT_LIMIT")
     if not isinstance(HEDGE_MAX_SLIPPAGE_BPS, (int, float)) or isinstance(HEDGE_MAX_SLIPPAGE_BPS, bool) or HEDGE_MAX_SLIPPAGE_BPS < 0:
         errs.append("HEDGE_MAX_SLIPPAGE_BPS must be a non-negative number")
+    if not (0 <= HEDGE_SOFT_INITIAL_RATIO <= 1):
+        errs.append("HEDGE_SOFT_INITIAL_RATIO must be in [0,1]")
+    if not (0 <= HEDGE_GAMMA_FRAC_FLOOR <= 1):
+        errs.append("HEDGE_GAMMA_FRAC_FLOOR must be in [0,1]")
+    if not isinstance(HEDGE_GAMMA_NORM_REF, (int, float)) or isinstance(HEDGE_GAMMA_NORM_REF, bool) or HEDGE_GAMMA_NORM_REF <= 0:
+        errs.append("HEDGE_GAMMA_NORM_REF must be > 0")
+    if not (0 <= HEDGE_REBALANCE_BAND_FRAC <= 1):
+        errs.append("HEDGE_REBALANCE_BAND_FRAC must be in [0,1]")
+    if not isinstance(HEDGE_MIN_HOLD_SECONDS, (int, float)) or isinstance(HEDGE_MIN_HOLD_SECONDS, bool) or HEDGE_MIN_HOLD_SECONDS < 0:
+        errs.append("HEDGE_MIN_HOLD_SECONDS must be >= 0")
+    if HEDGE_FINAL3H_MODE not in ("NORMAL", "SUPPRESS_SOFT_ADD"):
+        errs.append("HEDGE_FINAL3H_MODE must be NORMAL or SUPPRESS_SOFT_ADD")
+    if not isinstance(HEDGE_CRASH_MOVE_BPS, (int, float)) or isinstance(HEDGE_CRASH_MOVE_BPS, bool) or HEDGE_CRASH_MOVE_BPS < 0:
+        errs.append("HEDGE_CRASH_MOVE_BPS must be >= 0")
+    if not isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, (int, float)) or isinstance(HEDGE_CRASH_SPEED_WINDOW_SECONDS, bool) or HEDGE_CRASH_SPEED_WINDOW_SECONDS <= 0:
+        errs.append("HEDGE_CRASH_SPEED_WINDOW_SECONDS must be > 0")
+    if not isinstance(HEDGE_GAMMA_AWARE_ENABLED, bool) or not isinstance(HEDGE_CRASH_ENABLED, bool) or not isinstance(HEDGE_MAKER_FIRST_REDUCE_ENABLED, bool):
+        errs.append("HEDGE_GAMMA_AWARE_ENABLED/HEDGE_CRASH_ENABLED/HEDGE_MAKER_FIRST_REDUCE_ENABLED must be bool")
     required_limits = (
         "max_open_positions",
         "max_short_gamma",

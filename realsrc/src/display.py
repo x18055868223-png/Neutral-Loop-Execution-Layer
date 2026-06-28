@@ -578,11 +578,19 @@ def _risk_hedge_table(ctx):
         policy_rows = [
             ["对冲控制器", "state=%s ｜ reason=%s ｜ pending=%s" % (
                 h.get("policy_state") or "—", h.get("policy_reason") or "—", pending),
-             "V313 reconciliation，读交易所仓位为真"],
+             "V32 gamma-aware reconciliation，读交易所仓位为真"],
             ["控制器目标", "full %s ｜ eff %s ｜ current %s ｜ delta %s" % (
                 _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
                 _num(h.get("current_hedge_qty")), _num(h.get("policy_delta_to_trade"))),
              "只按 eff-current 发单"],
+            ["V32 参数", "soft %s ｜ gamma %s/%s ｜ band %s ｜ crash %sbps ｜ hold_until %s" % (
+                _pct1(h.get("soft_ratio")),
+                _pct1(h.get("gamma_fraction")),
+                h.get("gamma_data_state") or "—",
+                _num(h.get("rebalance_deadband")),
+                _num(h.get("crash_adverse_bps")),
+                _num(h.get("min_hold_until"), small=0, big=0)),
+             h.get("final3_mode") or "NORMAL"],
             ["控制器门控", "cross_bps %s ｜ %s ｜ cost_bps %s ｜ warn %s" % (
                 _num(h.get("policy_cross_bps")), cooldown,
                 _num(h.get("episode_cost_bps")), warnings),

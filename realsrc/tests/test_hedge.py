@@ -83,6 +83,11 @@ def test_option_net_delta_and_signed_target_use_actual_leg_quantities():
     assert abs(tgt - 0.004) < 1e-12
 
 
+def test_target_rounding_half_tick_is_stable_for_linear_delta():
+    tgt = H.hedge_target_position(-0.007499999999999996, 1.0, 60000, 1.0, 0.001, linear=True)
+    assert abs(tgt - 0.008) < 1e-12
+
+
 def test_structure_net_delta():
     # 同期 call 垂直：短腿 0.30 − 保护腿 0.15 = 0.15（保护腿抵消一半敞口）
     assert abs(H.structure_net_delta(0.30, 0.15) - 0.15) < 1e-12
@@ -114,3 +119,34 @@ def test_settlement_guard():
     ne = H.settlement_guard(0.0, near_expiry=True, settled=False, perp_qty=0.0)
     assert ne["target"] == 0.0 and ne["reason"] == "NEAR_EXPIRY_NO_NEW_HEDGE"
     assert H.settlement_guard(0.1, False, False, 0.0)["reason"] == "NORMAL"
+
+
+def test_gamma_fraction_bounds_and_monotonic():
+    low = H.hedge_gamma_fraction(0.000001, None, 0.1, 0.0, 60000.0,
+                                 ref=1_000_000.0, floor=0.30)
+    high = H.hedge_gamma_fraction(0.000003, None, 0.1, 0.0, 60000.0,
+                                  ref=1_000_000.0, floor=0.30)
+    missing = H.hedge_gamma_fraction(None, None, 0.1, 0.0, 60000.0,
+                                     ref=1_000_000.0, floor=0.30)
+    assert 0.30 <= low <= high <= 1.0
+    assert missing == 0.30
+
+
+def test_gamma_fraction_uses_combo_gamma():
+    short_only = H.hedge_gamma_fraction(0.000003, None, 0.1, 0.0, 60000.0,
+                                        ref=1_000_000.0, floor=0.30)
+    protected = H.hedge_gamma_fraction(0.000003, 0.000002, 0.1, 0.1, 60000.0,
+                                       ref=1_000_000.0, floor=0.30)
+    assert protected < short_only
+
+
+def test_rebalance_deadband_uses_target_band():
+    assert H.hedge_rebalance_deadband(0.02, 0.001, 0.20) == 0.004
+    assert H.hedge_rebalance_deadband(0.002, 0.001, 0.20) == 0.001
+
+
+def test_hedge_target_ratio_for_soft():
+    assert H.hedge_target_ratio_for_soft(0.40, 0.65) == 0.65
+    assert H.hedge_target_ratio_for_soft(0.40, 0.30) == 0.40
+    assert H.hedge_target_ratio_for_soft(0.40, 0.30, persisted=True) == 1.0
+    assert H.hedge_target_ratio_for_soft(0.40, 0.30, worsened=True) == 1.0

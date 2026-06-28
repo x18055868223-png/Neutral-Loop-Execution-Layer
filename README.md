@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_1_4.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_0.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.1.4-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.0-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -69,6 +69,17 @@ This repository contains the current independent execution-layer deliverable onl
   partial pending fills now keep single-flight blocking, while terminal/stale
   resolved fills are mirrored into `hedge_execution_history`. Deribit and
   `HEDGE_POLICY_V313_ENABLED = False` keep the legacy prompt-limit path.
+- v3.1.5 wires option-settlement reconciliation into startup recovery and
+  `POSITION_MANAGE`: after expiry grace and a successful exchange option read,
+  absent settled legs are finalized in the local snapshot with
+  `option_settlement_history` (`settlement_pnl_status=NOT_COMPUTED`), settled
+  shorts force hedge target zero/orphan reduce-only cleanup, and short-flat TP
+  evaluation no longer quotes expired instruments.
+- v3.2.0 upgrades the Binance hedge reconciliation policy with gamma-aware
+  SOFT sizing, raw full-delta HARD/CRASH targets, a 20% no-trade rebalance
+  band, ordinary reduce min-hold, final-3h SOFT-add suppression, and a 10-minute
+  crash override. The old Deribit dry hedge intent path is neutralized; runtime
+  interaction remains confirmation-code only.
 
 ## Boundary
 

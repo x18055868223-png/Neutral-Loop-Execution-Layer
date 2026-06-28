@@ -2,10 +2,10 @@
 """
 Post-entry hedge risk evaluator.
 
-The module is deliberately pure: it produces PositionRiskPackage and optional
-dry-run HedgeIntentPackage, but it never places orders or mutates the option
-ledger. It uses EDB as the aggregate manual input and keeps GGR as a boundary
-and persistence modifier, not as a probability predictor.
+The module is deliberately pure: it produces PositionRiskPackage only. Active
+hedge sizing and order intent are owned by the strategy-layer hedge controller,
+so this module never places orders, mutates the option ledger, or emits dry-run
+hedge instructions.
 """
 import math
 
@@ -21,17 +21,12 @@ STATE_HEDGE_READY = "HEDGE_READY"
 STATE_HEDGE_ACTIVE = "HEDGE_ACTIVE"
 STATE_MANUAL_REVIEW = "MANUAL_REVIEW"
 
-EXECUTION_DRY_INTENT_ONLY = "DRY_INTENT_ONLY"
-
 PERSISTENCE_LOW = "LOW"
 PERSISTENCE_MEDIUM = "MEDIUM"
 PERSISTENCE_HIGH = "HIGH"
 
 SIDE_SHORT_CALL = "SHORT_CALL"
 SIDE_SHORT_PUT = "SHORT_PUT"
-
-BUY_HEDGE = "BUY_FUTURE_OR_PERP"
-SELL_HEDGE = "SELL_FUTURE_OR_PERP"
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -340,39 +335,6 @@ def exit_vs_hedge_friction(exit_friction):
     }
 
 
-def _hedge_side(direction_bias):
-    return BUY_HEDGE if _is_short_call(direction_bias) else SELL_HEDGE
-
-
-def _hedge_size_mode(probability_now, drift, tail_acceleration,
-                     persistence, breached):
-    if breached or probability_now >= 0.80:
-        return "FULL", 0.90
-    if tail_acceleration == PERSISTENCE_HIGH and persistence == PERSISTENCE_HIGH:
-        return "FULL", 0.90
-    if probability_now >= 0.60 or drift >= 0.25 or persistence == PERSISTENCE_HIGH:
-        return "MEDIUM", 0.60
-    return "LIGHT", 0.30
-
-
-def _make_hedge_intent(position_id, direction_bias, probability_now, drift,
-                       tail_acceleration, persistence, breached):
-    mode, ratio = _hedge_size_mode(
-        probability_now, drift, tail_acceleration, persistence, breached)
-    return {
-        "schema_name": "HedgeIntentPackage",
-        "schema_version": "nrd.integration.hedge_intent.v0.1",
-        "position_id": position_id,
-        "hedge_side": _hedge_side(direction_bias),
-        "hedge_size_mode": mode,
-        "target_delta_reduction_ratio": ratio,
-        "hedge_instrument": "BTC-PERPETUAL",
-        "hedge_venue": "DERIBIT",
-        "execution_mode": EXECUTION_DRY_INTENT_ONLY,
-        "reason_codes": ["DRY_INTENT_ONLY", "TAIL_RISK_HEDGE_READY"],
-    }
-
-
 def _manual_review_package(position_id, entry_anchor, reason):
     return {
         "schema_name": SCHEMA_NAME,
@@ -415,13 +377,6 @@ def evaluate_position_risk(position_id, direction_bias, entry_risk_anchor,
     trigger = evaluate_hedge_trigger(
         direction_bias, entry_risk_anchor, current_price, p_now, policy)
     state = trigger["tail_risk_state"]
-    hedge_intent = None
-    if state == STATE_HEDGE_READY:
-        hedge_intent = _make_hedge_intent(
-            position_id, direction_bias, p_now,
-            trigger["current_risk"]["touch_probability_drift"],
-            PERSISTENCE_LOW, PERSISTENCE_LOW,
-            "BOUNDARY_BREACHED" in trigger["reason_codes"])
 
     return {
         "schema_name": SCHEMA_NAME,
@@ -433,6 +388,6 @@ def evaluate_position_risk(position_id, direction_bias, entry_risk_anchor,
         "price_line_touched": trigger["price_line_touched"],
         "exit_vs_hedge_friction": exit_vs_hedge_friction(exit_friction),
         "tail_risk_state": state,
-        "hedge_intent": hedge_intent,
+        "hedge_intent": None,
         "reason_codes": trigger["reason_codes"],
     }
