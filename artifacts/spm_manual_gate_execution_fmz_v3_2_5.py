@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.4-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.5-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.4-manual-gate"
+STRATEGY_VERSION = "3.2.5-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -3621,6 +3621,7 @@ def exec_quote(instrument):
         "underlying": t.get("underlying_price"),
         "delta": (t.get("greeks") or {}).get("delta"),
         "gamma": (t.get("greeks") or {}).get("gamma"),
+        "vega": (t.get("greeks") or {}).get("vega"),
     }
 
 
@@ -6505,8 +6506,8 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
     spm = spm_simulate_structure(SETTLEMENT_CURRENCY, short_i, long_i, amount)
     relief = (spm or {}).get("relief_ratio")
     proposed = {
-        "short_gamma": (sq or {}).get("gamma") or 0.0,
-        "short_vega": 0.0,                       # vega 待 Greeks 接入（E6/E7）
+        "short_gamma": (sq or {}).get("gamma"),
+        "short_vega": (sq or {}).get("vega"),
         "structure_margin": (spm or {}).get("im_with_protection"),
         "max_spread_loss": locked.get("max_loss"),
         "hedge_margin_reserve": 0.0,             # E7 接对冲保证金估算

@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.4-manual-gate`
+- Latest completed release: `3.2.5-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -72,6 +72,14 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   `ProjectedBudgetPackage` with `decision=BLOCK`, instead of passing an
   incomplete current portfolio into zero-default budget math.
 
+## Closed In v3.2.5
+
+- [x] P1: proposed option Greek inputs for precommit budget.
+  `exec_quote()` now carries option vega from Deribit ticker greeks, and
+  `_build_precommit_live()` passes proposed short gamma/vega as real required
+  inputs instead of defaulting missing values to zero. Missing proposed Greeks
+  now block through `BUDGET_INPUT_INCOMPLETE`.
+
 ## Must Fix Next
 
 - [ ] P1: no-snapshot orphan hedge policy decision.
@@ -92,9 +100,9 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 - [ ] Remove or rewrite stale docs that still describe authorization prompts as
   runtime behavior. Historical handoffs may remain, but current continuation
   docs should state confirmation-code-only interaction.
-- [ ] Review placeholder budget fields:
-  `short_vega = 0.0` and `hedge_margin_reserve = 0.0` in precommit live data.
-  These are not acceptable long-term risk inputs.
+- [ ] Review remaining placeholder budget reserve:
+  `hedge_margin_reserve = 0.0` in precommit live data is still not an
+  acceptable long-term risk input.
 - [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
   dedicated release. v3.2.2 keeps the symbol but config validation rejects
   `True`, so it is no longer an operator-enabled half feature.

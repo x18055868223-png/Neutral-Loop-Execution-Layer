@@ -108,6 +108,7 @@ def exec_quote(instrument):
         "underlying": t.get("underlying_price"),
         "delta": (t.get("greeks") or {}).get("delta"),
         "gamma": (t.get("greeks") or {}).get("gamma"),
+        "vega": (t.get("greeks") or {}).get("vega"),
     }
 
 

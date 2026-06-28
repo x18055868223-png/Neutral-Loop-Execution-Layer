@@ -164,3 +164,58 @@ def test_precommit_budget_blocks_when_current_portfolio_has_data_gap():
     assert live["current_portfolio_data_gap"] == "ACCOUNT_SUMMARY_QUERY_FAILED"
     assert live["_budget"]["fail_closed"] is True
     assert "CURRENT_PORTFOLIO_DATA_GAP:ACCOUNT_SUMMARY_QUERY_FAILED" in live["_budget"]["reason_codes"]
+
+
+def test_precommit_budget_blocks_when_proposed_short_vega_missing():
+    _clear()
+    quote = {
+        "mark": 0.003,
+        "best_bid": 0.0029,
+        "best_ask": 0.0031,
+        "tick": 0.0001,
+        "gamma": 0.0001,
+    }
+    locked = {
+        "short_instrument": "BTC-X-90000-P",
+        "long_instrument": "BTC-X-87500-P",
+        "amount": 0.1,
+        "max_loss": 0.01,
+        "side": "PUT",
+    }
+    manual_context = {
+        "direction_bias": "SHORT_PUT",
+        "expires_ts_ms": NOW + 60_000,
+        "planning_scope": {},
+        "risk_policy": {},
+        "market_context": {
+            "source": "GEX_MONITOR_IV_RV_RANK",
+            "side": "SHORT_PUT",
+            "iv_rv_ratio": 1.2,
+            "iv_rv_rank_pct": 70,
+        },
+    }
+    old = _patch(
+        exec_quote=lambda _inst: dict(quote),
+        spm_simulate_structure=lambda *_args, **_kwargs: {
+            "im_with_protection": 0.01,
+            "relief_ratio": 0.2,
+        },
+        ledger_reconcile=lambda _currency: {"actual": {}, "expected": {}},
+        validate_manual_context=lambda _ctx, _now: {"valid": True},
+        _current_portfolio=lambda: {
+            "data_gap": None,
+            "open_positions": 0,
+            "short_gamma": 0.0,
+            "short_vega": 0.0,
+            "margin_used": 0.0,
+        },
+        dbt_get_open_orders=lambda _currency: [],
+    )
+    try:
+        live = ST._build_precommit_live(locked, 88000.0, manual_context, NOW)
+    finally:
+        _restore(old)
+
+    assert live["projected_budget_decision"] == "BLOCK"
+    assert live["_budget"]["fail_closed"] is True
+    assert "BUDGET_INPUT_INCOMPLETE:short_vega" in live["_budget"]["reason_codes"]

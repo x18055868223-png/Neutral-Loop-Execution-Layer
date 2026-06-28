@@ -1125,8 +1125,8 @@ def _build_precommit_live(locked, spot, manual_context, now_ms):
     spm = spm_simulate_structure(SETTLEMENT_CURRENCY, short_i, long_i, amount)
     relief = (spm or {}).get("relief_ratio")
     proposed = {
-        "short_gamma": (sq or {}).get("gamma") or 0.0,
-        "short_vega": 0.0,                       # vega 待 Greeks 接入（E6/E7）
+        "short_gamma": (sq or {}).get("gamma"),
+        "short_vega": (sq or {}).get("vega"),
         "structure_margin": (spm or {}).get("im_with_protection"),
         "max_spread_loss": locked.get("max_loss"),
         "hedge_margin_reserve": 0.0,             # E7 接对冲保证金估算

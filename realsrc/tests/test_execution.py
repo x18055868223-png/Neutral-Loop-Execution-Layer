@@ -88,6 +88,20 @@ def test_spread_ratio():
     assert EX.exec_spread_ratio({"best_bid": None, "best_ask": 0.01}) is None
 
 
+def test_exec_quote_surfaces_vega_for_budget_inputs():
+    EX.dbt_ticker = lambda inst: {
+        "mark_price": 0.01,
+        "best_bid_price": 0.009,
+        "best_ask_price": 0.011,
+        "greeks": {"delta": 0.3, "gamma": 0.0001, "vega": 0.12},
+    }
+    EX.dbt_get_instrument = lambda inst: {"tick_size": 0.0001}
+    q = EX.exec_quote("BTC-X-90000-P")
+    _restore_ex()
+
+    assert q["vega"] == 0.12
+
+
 def _mock_quote(_inst):
     return {"mark_price": 0.01, "best_bid_price": 0.0097, "best_ask_price": 0.0103,
             "greeks": {"delta": 0.3}}
