@@ -107,8 +107,13 @@ def dbt_account_summary(currency, extended=True):
 
 
 def dbt_get_positions(currency, kind="option"):
+    return dbt_get_positions_strict(currency, kind) or []
+
+
+def dbt_get_positions_strict(currency, kind="option"):
+    """Return a list on a successful read; return None on transport/API failure."""
     return _call("GET", "/private/get_positions",
-                 {"currency": currency, "kind": kind}, "get_positions", _READ_RETRIES) or []
+                 {"currency": currency, "kind": kind}, "get_positions", _READ_RETRIES)
 
 
 def dbt_simulate_portfolio(currency, simulated_positions, add_positions=True):

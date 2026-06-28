@@ -1146,6 +1146,10 @@ def _settlement_reconcile_snapshot(snap, option_positions, now_ms):
     if not snap:
         return {"snap": snap, "changed": False, "events": [],
                 "settlement_state": "NONE", "reason": "NO_POSITION_SNAPSHOT"}
+    if option_positions is None:
+        return {"snap": snap, "changed": False, "events": [],
+                "settlement_state": (snap or {}).get("settlement_state") or "NONE",
+                "reason": "OPTION_POSITION_DATA_GAP"}
     actual = _option_position_map(option_positions)
     updated = dict(snap)
     events = []
@@ -1465,8 +1469,39 @@ def _recovery_verdict():
     return _G(_RECOVERY_KEY) or {"state": "OK", "allow_new_open": True}
 
 
+def _orphan_hedge_cleanup_detail(recovery):
+    recovery = recovery or {}
+    qty = recovery.get("perp_qty")
+    side = None
+    if isinstance(qty, (int, float)) and not isinstance(qty, bool):
+        if qty > 1e-12:
+            side = "sell"
+        elif qty < -1e-12:
+            side = "buy"
+    return {
+        "state": recovery.get("state") or "ORPHAN_HEDGE_EMERGENCY",
+        "mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+        "venue": recovery.get("venue") or HEDGE_VENUE,
+        "instrument": recovery.get("instrument") or (
+            HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE" else HEDGE_INSTRUMENT),
+        "perp_qty": qty,
+        "suggested_side": side,
+        "reasons": recovery.get("reasons") or [],
+    }
+
+
+def _clear_recovery_ok(reason, now_ms):
+    verdict = {"state": "OK", "reasons": [], "allow_new_open": True,
+               "cleared_reason": reason, "cleared_ts": now_ms}
+    _G(_RECOVERY_KEY, verdict)
+    return verdict
+
+
 def _archive_closed(snap, now_ms):
     """P0②：两腿 + 对冲 perp 均归零 → 归档 closed_position_history、清快照、置 CLOSED。"""
+    hedge_state = _G(_HEDGE_POLICY_STATE_KEY) or {}
+    if hedge_state.get("pending_order_id"):
+        return False
     hist = list(_G(_CLOSED_HISTORY_KEY) or [])
     rec = dict(snap or {})
     rec["closed_ts"] = now_ms
@@ -1474,6 +1509,9 @@ def _archive_closed(snap, now_ms):
     _G(_CLOSED_HISTORY_KEY, hist[-50:])
     _G(_POSITION_KEY, None)
     ledger_set_state(S_CLOSED)
+    _clear_recovery_ok("POSITION_CLOSED_ARCHIVED", now_ms)
+    _G(_HEDGE_POLICY_STATE_KEY, _hedge_policy_default_state(None))
+    return True
 
 
 def _is_entry_order_label(label):
@@ -1528,21 +1566,30 @@ def _cancel_startup_entry_orders(currency):
 
 def _read_startup_positions(currency):
     try:
-        opt = dbt_get_positions(currency, "option") or []
+        opt = dbt_get_positions_strict(currency, "option")
     except Exception:
-        opt = []
-    try:
-        perp = dbt_get_positions(currency, "future") or []
-    except Exception:
-        perp = []
-    perp_qty = sum(abs(p.get("size") or 0.0) for p in perp)
+        opt = None
+    if opt is None:
+        return None, None, {"state": "RECOVERY_BLOCKED",
+                            "reasons": ["OPTION_POSITION_QUERY_FAILED"],
+                            "allow_new_open": False}
     if HEDGE_VENUE == "BINANCE":
         b_qty = bnc_get_position_btc(HEDGE_BINANCE_INSTRUMENT)
         if b_qty is None:
             return opt, None, {"state": "RECOVERY_BLOCKED",
                                "reasons": ["HEDGE_POSITION_QUERY_FAILED"],
                                "allow_new_open": False}
-        perp_qty = abs(b_qty)
+        perp_qty = b_qty
+    else:
+        try:
+            perp = dbt_get_positions_strict(currency, "future")
+        except Exception:
+            perp = None
+        if perp is None:
+            return opt, None, {"state": "RECOVERY_BLOCKED",
+                               "reasons": ["HEDGE_POSITION_QUERY_FAILED"],
+                               "allow_new_open": False}
+        perp_qty = sum((p.get("size") or 0.0) for p in perp)
     return opt, perp_qty, None
 
 
@@ -1583,7 +1630,10 @@ def startup_recovery_check(currency):
             if short_qty <= 1e-12 and abs(perp_qty or 0.0) > 1e-9:
                 verdict = {"state": "ORPHAN_HEDGE_EMERGENCY",
                            "reasons": ["SETTLED_OPTION_WITH_PERP_HEDGE"],
-                           "allow_new_open": False}
+                           "allow_new_open": False,
+                           "perp_qty": perp_qty, "venue": HEDGE_VENUE,
+                           "instrument": (HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE"
+                                          else HEDGE_INSTRUMENT)}
                 _G(_RECOVERY_KEY, verdict)
                 return verdict
     if (not snap) and _has_entry_progress(prog):
@@ -1602,6 +1652,10 @@ def startup_recovery_check(currency):
         return block
     verdict = evaluate_startup_recovery(opt, perp_qty, short_qty, active_orders=orders,
                                         expected_long_qty=long_qty)
+    if verdict.get("state") == "ORPHAN_HEDGE_EMERGENCY":
+        verdict.update({"perp_qty": perp_qty, "venue": HEDGE_VENUE,
+                        "instrument": (HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE"
+                                       else HEDGE_INSTRUMENT)})
     _G(_RECOVERY_KEY, verdict)
     return verdict
 
@@ -2450,8 +2504,14 @@ def _evaluate_position_risk_now(snap, now_ms, existing_hedge=False, quote_fn=Non
     PositionRiskPackage（触界概率/漂移/尾部加速/持续性 → tail_risk_state）。
     无快照 / 无入场锚 → None（不驱动主动退出/对冲，保守留给止盈资格 + 孤儿）。
     注：无执行侧风险上下文时 persistence 恒 LOW；有人工审计/执行风险上下文时进入持续性判定。"""
-    anchor = (snap or {}).get("entry_risk_anchor")
-    if not snap or not anchor:
+    if not snap:
+        return None
+    if ((snap.get("remaining_short_qty") or 0.0) <= 1e-12
+            or snap.get("settlement_state") in ("SHORT_SETTLED", "BOTH_LEGS_SETTLED", "SETTLED")):
+        return {"tail_risk_state": None, "market_data_gap": False,
+                "current_risk": {}, "reason_codes": ["OPTION_SETTLED_NO_SHORT_RISK"]}
+    anchor = snap.get("entry_risk_anchor")
+    if not anchor:
         return None
     if (snap or {}).get("hedge_trigger_policy"):
         anchor = dict(anchor, hedge_trigger_policy=snap.get("hedge_trigger_policy"))
@@ -2839,16 +2899,21 @@ def manage_cycle(now_ms):
     authorized = bool(snap)
     opt_pos_read_ok = True
     try:
-        opt_pos = dbt_get_positions(SETTLEMENT_CURRENCY, "option") or []
+        opt_pos = dbt_get_positions_strict(SETTLEMENT_CURRENCY, "option")
     except Exception:
-        opt_pos = []
+        opt_pos = None
+        opt_pos_read_ok = False
+    if opt_pos is None:
         opt_pos_read_ok = False
     if opt_pos_read_ok:
         settlement = _settlement_reconcile_snapshot(snap, opt_pos, now_ms)
         if settlement.get("changed"):
             snap = settlement.get("snap")
             _G(_POSITION_KEY, snap)
-    rec = position_reconcile(snap, opt_pos)        # P0①：快照 vs 交易所（surfaced；不阻断风险收口）
+    if opt_pos_read_ok:
+        rec = position_reconcile(snap, opt_pos)        # P0①：快照 vs 交易所（surfaced；不阻断风险收口）
+    else:
+        rec = {"reconciled": None, "reasons": ["OPTION_POSITION_QUERY_FAILED"]}
 
     quote_fn = _quote_cache()
     tp = _evaluate_take_profit(snap, quote_fn, now_ms)
@@ -3025,6 +3090,8 @@ def run_cycle(now_ms=None):
 
     if recovery.get("state") == "RECOVERY_BLOCKED":
         phase = "RECOVERY_BLOCKED"
+    elif recovery.get("state") == "ORPHAN_HEDGE_EMERGENCY" and not has_pos:
+        phase = "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED"
     elif has_pos:
         manage_result = manage_cycle(now_ms)
         phase = "POSITION_MANAGE"
@@ -3200,6 +3267,8 @@ def run_cycle(now_ms=None):
                    HEDGE_OPEN_EXECUTION_STYLE, _h["action"].get("reduce_only")))
     if recovery.get("state") != "OK":
         ctx["recovery_state"] = recovery.get("state")
+    if phase == "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED":
+        ctx["orphan_hedge_cleanup"] = _orphan_hedge_cleanup_detail(recovery)
     if locked and not (commit_result and commit_result.get("committed")):
         ctx["locked_plan_summary"] = "%s %s" % (locked.get("confirm_code"), locked.get("summary"))
         if not ctx.get("preview_plan_detail"):

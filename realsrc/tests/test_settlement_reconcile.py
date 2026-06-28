@@ -74,6 +74,19 @@ def test_settlement_finalizer_unexpired_absent_does_not_zero_snapshot():
     assert out["snap"]["long_remaining_qty"] == 0.1
 
 
+def test_settlement_reconcile_position_data_gap_does_not_finalize():
+    _clear()
+    snap = _snap()
+
+    out = ST._settlement_reconcile_snapshot(snap, None, NOW)
+
+    assert out["changed"] is False
+    assert out["reason"] == "OPTION_POSITION_DATA_GAP"
+    assert out["snap"]["remaining_short_qty"] == 0.1
+    assert out["snap"]["long_remaining_qty"] == 0.1
+    assert not out["snap"].get("option_settlement_history")
+
+
 def test_hedge_after_settlement_forces_target_zero_and_orphan():
     _clear()
     orig = {
@@ -113,6 +126,25 @@ def test_take_profit_short_flat_does_not_quote_expired_leg():
     assert tp["quote_gap"] is None
 
 
+def test_settled_short_risk_evaluator_does_not_quote_or_report_gap():
+    _clear()
+    snap = _snap()
+    snap["remaining_short_qty"] = 0.0
+    snap["settlement_state"] = "SHORT_SETTLED"
+    snap["entry_risk_anchor"] = {
+        "entry_touch_probability": 0.20,
+        "entry_loss_boundary": 90000,
+        "entry_dte_hours": 1,
+    }
+
+    def quote_should_not_be_called(_inst):
+        raise AssertionError("settled short risk path should not quote")
+
+    risk = ST._evaluate_position_risk_now(snap, NOW, quote_fn=quote_should_not_be_called)
+    assert risk["market_data_gap"] is False
+    assert risk["reason_codes"] == ["OPTION_SETTLED_NO_SHORT_RISK"]
+
+
 def test_startup_recovery_expired_short_no_option_with_perp_returns_orphan():
     _clear()
     orig = {
@@ -137,6 +169,94 @@ def test_startup_recovery_expired_short_no_option_with_perp_returns_orphan():
     finally:
         for name, value in orig.items():
             setattr(ST, name, value)
+
+
+def test_startup_recovery_position_query_failure_does_not_settle_snapshot():
+    _clear()
+    had_strict = hasattr(ST, "dbt_get_positions_strict")
+    strict_orig = getattr(ST, "dbt_get_positions_strict", None)
+    orig = {
+        "dbt_get_positions": ST.dbt_get_positions,
+        "dbt_get_open_orders": ST.dbt_get_open_orders,
+        "bnc_get_position_btc": ST.bnc_get_position_btc,
+        "HEDGE_VENUE": ST.HEDGE_VENUE,
+        "_now_ms": ST._now_ms,
+    }
+    try:
+        fmz_shim._G(ST._POSITION_KEY, _snap())
+        ST.HEDGE_VENUE = "BINANCE"
+        ST.dbt_get_positions_strict = lambda _currency, kind=None: None if kind == "option" else []
+        ST.dbt_get_positions = lambda _currency, kind=None: [] if kind == "option" else []
+        ST.dbt_get_open_orders = lambda *_a, **_k: []
+        ST.bnc_get_position_btc = lambda *_a, **_k: 0.0
+        ST._now_ms = lambda: NOW
+
+        verdict = ST.startup_recovery_check("BTC")
+
+        assert verdict["state"] == "RECOVERY_BLOCKED"
+        assert "OPTION_POSITION_QUERY_FAILED" in verdict["reasons"]
+        saved = fmz_shim._G(ST._POSITION_KEY)
+        assert saved["remaining_short_qty"] == 0.1
+        assert saved["long_remaining_qty"] == 0.1
+        assert not saved.get("option_settlement_history")
+    finally:
+        for name, value in orig.items():
+            setattr(ST, name, value)
+        if had_strict:
+            ST.dbt_get_positions_strict = strict_orig
+        else:
+            try:
+                delattr(ST, "dbt_get_positions_strict")
+            except AttributeError:
+                pass
+
+
+def test_archive_closed_clears_recovery_and_hedge_policy_state():
+    _clear()
+    fmz_shim._G(ST._POSITION_KEY, {"position_id": "closed-pos"})
+    fmz_shim._G(ST._RECOVERY_KEY, {
+        "state": "ORPHAN_HEDGE_EMERGENCY",
+        "allow_new_open": False,
+        "reasons": ["PERP_HEDGE_WITHOUT_OPTION_SHORT_RISK"],
+    })
+    fmz_shim._G(ST._HEDGE_POLICY_STATE_KEY, {
+        "position_id": "closed-pos",
+        "pending_order_id": None,
+        "last_action": "REDUCE",
+    })
+
+    archived = ST._archive_closed({"position_id": "closed-pos"}, NOW)
+
+    assert archived is True
+    assert fmz_shim._G(ST._POSITION_KEY) is None
+    recovery = fmz_shim._G(ST._RECOVERY_KEY)
+    assert recovery["state"] == "OK"
+    assert recovery["allow_new_open"] is True
+    assert recovery["cleared_reason"] == "POSITION_CLOSED_ARCHIVED"
+    hedge_state = fmz_shim._G(ST._HEDGE_POLICY_STATE_KEY)
+    assert hedge_state["position_id"] is None
+    assert hedge_state["pending_order_id"] is None
+
+
+def test_archive_closed_does_not_clear_recovery_when_hedge_pending_exists():
+    _clear()
+    snap = {"position_id": "pending-pos"}
+    fmz_shim._G(ST._POSITION_KEY, snap)
+    fmz_shim._G(ST._RECOVERY_KEY, {
+        "state": "ORPHAN_HEDGE_EMERGENCY",
+        "allow_new_open": False,
+        "reasons": ["PERP_HEDGE_WITHOUT_OPTION_SHORT_RISK"],
+    })
+    fmz_shim._G(ST._HEDGE_POLICY_STATE_KEY, {
+        "position_id": "pending-pos",
+        "pending_order_id": "hedge-1",
+    })
+
+    archived = ST._archive_closed(snap, NOW)
+
+    assert archived is False
+    assert fmz_shim._G(ST._POSITION_KEY) == snap
+    assert fmz_shim._G(ST._RECOVERY_KEY)["state"] == "ORPHAN_HEDGE_EMERGENCY"
 
 
 def test_startup_recovery_unexpired_record_short_no_exchange_option_still_blocked():

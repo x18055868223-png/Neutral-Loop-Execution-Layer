@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_0.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_1.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.0-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.1-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -80,6 +80,12 @@ This repository contains the current independent execution-layer deliverable onl
   band, ordinary reduce min-hold, final-3h SOFT-add suppression, and a 10-minute
   crash override. The old Deribit dry hedge intent path is neutralized; runtime
   interaction remains confirmation-code only.
+- v3.2.1 closes the first settlement/recovery safety gaps from the v3.2 audit:
+  Deribit option-position reads now have strict failure semantics, settlement
+  reconcile no longer treats read failure as empty exchange positions, CLOSED
+  archive clears recovery only when no hedge pending remains, no-snapshot orphan
+  hedge recovery gets an explicit manual-cleanup read-screen phase, and settled
+  shorts no longer produce noisy risk quote gaps.
 
 ## Boundary
 

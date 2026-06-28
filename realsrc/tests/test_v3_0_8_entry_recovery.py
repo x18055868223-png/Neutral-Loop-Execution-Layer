@@ -11,7 +11,7 @@ import strategy as ST
 _ORIG = {k: getattr(ST, k) for k in (
     "_build_precommit_live", "evaluate_precommit_checks", "exec_entry_campaign_step",
     "exec_maker_only_fill", "exec_plan_prices", "_build_entry_risk_anchor", "dbt_get_positions",
-    "dbt_get_open_orders", "dbt_cancel", "bnc_get_position_btc",
+    "dbt_get_positions_strict", "dbt_get_open_orders", "dbt_cancel", "bnc_get_position_btc",
 )}
 _ORIG_VARS = {k: getattr(ST, k) for k in (
     "RUN_PROFILE", "ALLOW_ENTRY_TRADING", "ALLOW_EXIT_TRADING", "ALLOW_HEDGE_TRADING",
@@ -300,6 +300,7 @@ def test_startup_recovery_cancels_entry_orders_before_verdict():
         [],
     ]
     try:
+        ST.dbt_get_positions_strict = lambda *_a: []
         ST.dbt_get_positions = lambda *_a: []
         ST.dbt_get_open_orders = lambda *_a: seq.pop(0)
         ST.dbt_cancel = lambda oid: cancelled.append(oid) or {"order_id": oid}
@@ -322,7 +323,8 @@ def test_startup_recovery_adopts_locked_protection_only_progress():
     ]
     try:
         ST.HEDGE_VENUE = "DERIBIT"
-        ST.dbt_get_positions = lambda *_a: positions.pop(0)
+        ST.dbt_get_positions_strict = lambda *_a: positions.pop(0)
+        ST.dbt_get_positions = ST.dbt_get_positions_strict
         ST.dbt_get_open_orders = lambda *_a: []
         ST.dbt_cancel = lambda _oid: True
         locked = _locked(0.1, 0.0, attempts=1)
@@ -354,7 +356,8 @@ def test_startup_recovery_rereads_positions_after_entry_order_cancel():
     try:
         ST.dbt_get_open_orders = lambda *_a: open_orders.pop(0)
         ST.dbt_cancel = lambda _oid: True
-        ST.dbt_get_positions = lambda *_a: positions.pop(0)
+        ST.dbt_get_positions_strict = lambda *_a: positions.pop(0)
+        ST.dbt_get_positions = ST.dbt_get_positions_strict
 
         verdict = ST.startup_recovery_check("BTC")
 
@@ -369,6 +372,7 @@ def test_startup_recovery_blocks_when_entry_order_remains_after_cancel():
     order = {"order_id": "o1", "label": "entry_prot", "instrument_name": "BTC-X"}
     seq = [[order], [order]]
     try:
+        ST.dbt_get_positions_strict = lambda *_a: []
         ST.dbt_get_positions = lambda *_a: []
         ST.dbt_get_open_orders = lambda *_a: seq.pop(0)
         ST.dbt_cancel = lambda oid: cancelled.append(oid) or {"order_id": oid}

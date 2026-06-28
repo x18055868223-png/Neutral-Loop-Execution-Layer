@@ -152,6 +152,24 @@ def test_run_cycle_no_vrp_context_displays_menu_without_codes():
     assert not ctx["pending_candidates"]
 
 
+def test_orphan_hedge_without_snapshot_has_explicit_manual_cleanup_phase():
+    ST = _setup()
+    fmz_shim._G(ST._RECOVERY_KEY, {
+        "state": "ORPHAN_HEDGE_EMERGENCY",
+        "allow_new_open": False,
+        "reasons": ["PERP_HEDGE_WITHOUT_OPTION_SHORT_RISK"],
+        "perp_qty": 0.01,
+        "venue": "BINANCE",
+        "instrument": "BTCUSDC",
+    })
+
+    ctx = ST.run_cycle()
+
+    assert ctx["console_phase"] == "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED"
+    assert ctx["recovery_state"] == "ORPHAN_HEDGE_EMERGENCY"
+    assert ctx["orphan_hedge_cleanup"]["suggested_side"] == "sell"
+
+
 def test_run_cycle_vrp_context_builds_library_then_locks():
     ST = _setup()
     _seed_market_context(ST)
