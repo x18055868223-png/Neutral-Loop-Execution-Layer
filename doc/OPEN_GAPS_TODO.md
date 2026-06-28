@@ -7,7 +7,7 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 ## Current Baseline
 
 - Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.9-manual-gate`
+- Latest completed release: `3.2.10-manual-gate`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
@@ -113,19 +113,22 @@ until the code, tests, bundle, and delivery notes prove it is closed.
   equity when current margin usage is equity-ratio based. Missing delta or
   equity inputs fail closed through the existing projected-budget package.
 
+## Closed In v3.2.10
+
+- [x] P1: remove stale current authorization surface.
+  A current-doc scan found no current runtime authorization prompt instructions
+  outside historical handoffs; current docs state confirmation-code-only
+  interaction. The obsolete source-only `realsrc/src/authorization.py` module
+  and its legacy tests were deleted, and a source isolation test now prevents
+  the runtime authorization module from returning.
+
 ## Must Fix Next
 
-- [ ] P1: remove or rewrite stale current docs that still describe
-  authorization prompts as runtime behavior. Historical handoffs may remain,
-  but current continuation docs should state confirmation-code-only
-  interaction.
+- [ ] P1: no open must-fix item currently identified beyond cleanup candidates
+  below.
 
 ## Redundancy / Cleanup Candidates
 
-- [ ] Review `realsrc/src/authorization.py`.
-  Runtime authorization commands are no longer part of the FMZ surface and the
-  bundle excludes this module. Keep it only if tests still need it as a legacy
-  pure-function reference; otherwise remove in a dedicated cleanup release.
 - [ ] Remove or fully implement `HEDGE_MAKER_FIRST_REDUCE_ENABLED` in a later
   dedicated release. v3.2.2 keeps the symbol but config validation rejects
   `True`, so it is no longer an operator-enabled half feature.

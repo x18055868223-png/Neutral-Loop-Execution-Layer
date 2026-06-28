@@ -47,6 +47,10 @@ def test_bundle_excludes_runtime_authorization_module():
     assert "authorize_from_code" not in src
 
 
+def test_source_excludes_runtime_authorization_module():
+    assert not os.path.exists(os.path.join(SRC, "authorization.py"))
+
+
 def test_source_excludes_legacy_binance_hedge_helper():
     assert "bnc_place_hedge" not in _read("binance_io.py")
     assert "bnc_place_hedge" not in _read("execution.py")

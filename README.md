@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_9.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_10.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.9-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.10-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -125,6 +125,10 @@ This repository contains the current independent execution-layer deliverable onl
   `abs(option_net_delta) * HEDGE_MARGIN_RESERVE_RATE`, normalized by account
   equity when margin usage is already expressed as an equity ratio; missing
   required delta/equity inputs fail closed through the existing budget package.
+- v3.2.10 removes the obsolete source-only `authorization.py` module and its
+  legacy tests. Runtime interaction remains confirmation-code-only; TP,
+  risk-exit, reject, stop, resume, revoke, and manual hedge commands are still
+  absent from the FMZ command router and generated bundle.
 
 ## Boundary
 
