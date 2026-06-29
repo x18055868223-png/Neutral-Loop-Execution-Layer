@@ -166,6 +166,36 @@ def test_exit_buyback_taker_crosses_at_cap():
     _restore_ex()
 
 
+def test_entry_protection_taker_buy_rounds_up_to_cross_ask_tick():
+    seen = {}
+
+    def _place(side, inst, amt, price, **kwargs):
+        seen["side"] = side
+        seen["price"] = price
+        seen["post_only"] = kwargs.get("post_only")
+        return {"order": {"order_id": "t1", "order_state": "filled",
+                          "filled_amount": amt, "average_price": price}}
+
+    EX.dbt_get_instrument = lambda inst: {"tick_size": 0.0001}
+    EX.dbt_place_order = _place
+    EX.dbt_get_order_state = lambda oid: {
+        "order": {"order_id": oid, "order_state": "filled",
+                  "filled_amount": 0.1, "average_price": seen["price"]}}
+    EX.dbt_cancel = lambda oid: {"order_id": oid}
+    EX.Sleep = lambda ms: None
+
+    r = EX._post_taker_once(
+        "buy", "P", 0.1, 0.00095, "entry_prot_taker",
+        meta={"tick_size": 0.0001},
+        quote={"best_ask": 0.00095}, leg="protection")
+
+    assert seen["side"] == "buy"
+    assert seen["post_only"] is False
+    assert _approx(seen["price"], 0.0010)
+    assert _approx(r["final_price"], 0.0010)
+    _restore_ex()
+
+
 def test_exit_buyback_maker_passive_below_ask():
     EX.dbt_ticker = _mock_quote                      # ask 0.0103 tick 0.0001 → maker_safe 0.0102
     EX.dbt_get_instrument = lambda i: {"tick_size": 0.0001}

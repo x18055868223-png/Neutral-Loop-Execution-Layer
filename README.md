@@ -7,10 +7,10 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_13.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.13-manual-gate"`
+- Version: `STRATEGY_VERSION = "3.2.28-manual-gate"`
 - Status: live-test defaults with manual confirm-code gate
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
@@ -143,6 +143,87 @@ This repository contains the current independent execution-layer deliverable onl
   `crash_adverse_bps` into `POSITION_MANAGE`, and the risk/hedge table renders
   a read-only `Crash观测` row. No hedge gate, trigger threshold, or conditional
   order behavior changes.
+- v3.2.14 closes two audit-found readiness gaps: TEST profile now forces V32
+  hedge cleanup submits to dry-run even when reduce-only cleanup bypasses the
+  normal hedge gate, and `run_cycle()` treats a persisted position snapshot as
+  an active position even if the local ledger state was lost.
+- v3.2.15 tightens two trader-facing execution details: V32 episode-cost display
+  is now explicitly labeled `reserved_not_computed` telemetry rather than real
+  computed cost, and protection-leg taker buy fallback uses taker-specific
+  tick rounding so a buy crosses the quoted ask after rounding.
+- v3.2.16 adds the required lifecycle map and closes the startup orphan hedge
+  cleanup gap: when startup recovery has strict evidence of no option short
+  risk, a Binance perp orphan, clean open-order reads, and Binance order
+  lifecycle support, LIVE submits an automatic reduce-only cleanup while TEST
+  stays dry-run. Missing lifecycle support remains manual cleanup with no order.
+- v3.2.17 starts the centralized lifecycle scenario matrix with a deterministic
+  local harness that asserts `_G` state, no-order evidence, and parsed
+  `LogStatus` tables. It also changes the TEST plan-phase RUN_PROFILE row to
+  Chinese-first wording: `测试模式：不会真实下单`.
+- v3.2.18 expands the lifecycle matrix to cover TEST no-order behavior during
+  take-profit, protection recovery, hedge-ready management, and orphan cleanup.
+  It also classifies no-option-risk + Binance perp + unknown active orders as
+  orphan manual cleanup, so the trader sees a clear manual only-reduce path
+  instead of a generic recovery block.
+- v3.2.19 expands the lifecycle matrix through the confirmation-code and
+  precommit boundary: valid confirmation locks the plan without orders when the
+  entry gate is closed, wrong confirmation codes do not lock or order, and
+  unknown same-leg active option orders block precommit. The status panel now
+  displays last-command outcomes and precommit failed checks in Chinese first,
+  with raw check keys kept only in parentheses.
+- v3.2.20 expands the lifecycle matrix through protected-entry multi-loop
+  states: full protection+short fill freezes a snapshot, protection-only fill
+  keeps the locked campaign without naked short risk, short partial fill enters
+  position management, and a pending protection maker order is not duplicated
+  across loops. It also fixes post-entry status display and counts only actual
+  entry fills in `fill_count`.
+- v3.2.21 expands the lifecycle matrix with TEST confirm-code dry/no-order,
+  protection cancel late-fill idempotency, and risk-exit ask-depth data-gap
+  coverage. Risk-exit blocked reasons now render Chinese-first in `LogStatus`
+  and low-frequency `Log` summaries while keeping the internal reason code in
+  structured context.
+- v3.2.22 expands the lifecycle matrix through LIVE TP/risk-exit closeout
+  paths and startup recovery read-failure screens: TP maker buyback and
+  risk-exit taker buyback are idempotent across repeated loops, risk-exit
+  ask-above-cap does not over-spend, and Binance/Deribit recovery read failures
+  now display Chinese manual-check reasons in `LogStatus`.
+- v3.2.23 expands the lifecycle matrix through remaining TP/risk-exit closeout
+  evidence: risk-exit quote gap, risk-exit insufficient ask depth, TP maker
+  cancel-late-fill accounting, and partial-exit next-loop completion without
+  double-counting. No production behavior change was needed beyond the version
+  bump and regenerated delivery bundle.
+- v3.2.24 expands the lifecycle matrix through V32 Binance hedge order
+  lifecycle behavior: live hedge submit writes a pending order and blocks
+  duplicate submits, missing Binance order IDs enter the unknown-submit guard,
+  terminal pending fills write hedge execution history once, and hedge policy
+  pending/unknown reasons now render Chinese-first in `LogStatus`.
+- v3.2.25 expands the lifecycle matrix through V32 hedge trigger/read-screen
+  variants: SOFT initial add, HARD trigger while add-cooldown is active,
+  final-3h SOFT-add suppression with no order, and ordinary reduce-only unwind.
+  SOFT/HARD/final-3h/reduce policy reasons now render Chinese-first in
+  `LogStatus`.
+- v3.2.26 completes the 40-row lifecycle matrix with settlement/archive/accounting
+  rows: option read gaps do not false-settle, short-leg settlement is
+  idempotent while long residual remains, both-leg settlement archives final
+  PnL, closed archive is not duplicated, missing settlement price archives as
+  `DATA_GAP` instead of zero PnL, and settlement-with-perp submits reduce-only
+  cleanup without premature archive. The ledger table now renders settlement,
+  protection recovery, option realized PnL, and final option PnL in
+  Chinese-first operator text.
+- Final local audit package: `AUDIT_REPORT.md`,
+  `UX_STATUS_PANEL_AUDIT.md`, and `TEST_SUMMARY.md` record the
+  `SMALL_SIZE_LIVE_TEST_READY` local verdict, with an additional test-only row
+  041 for protection-recovery no-double-count evidence. This verdict is not FMZ
+  live proof; it requires live robot/exchange acceptance with the exact current
+  artifact.
+- v3.2.27 closes the Opus 4.8 P1 display gap: every reachable V32 hedge
+  controller reason now has Chinese-first `LogStatus` wording, including
+  steady-state, deadband, cooldown, reverse-unwind, crash, and policy-disabled
+  states. The fix is display-only and adds registry/read-screen tests so raw
+  machine codes no longer become primary operator text.
+- v3.2.28 closes the Opus 4.8 P2 display note gap: exit-campaign states such as
+  `WORKING_LONG`, `LONG_RESIDUAL_ONLY`, and `PAUSED_BY_BUDGET` now render as
+  Chinese-first text in the lifecycle note, pipeline echo, and console rows.
 
 ## Boundary
 

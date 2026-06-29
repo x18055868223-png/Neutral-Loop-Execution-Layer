@@ -397,6 +397,106 @@ def test_position_manage_ctx_carries_structured_display_details():
     assert ctx["take_profit_detail"]["tp_underlying_target_method"] in ("delta_linear", "data_gap")
 
 
+def test_test_profile_orphan_hedge_cleanup_stays_dry_even_when_gate_bypassed():
+    ST = _setup()
+    orig = {name: getattr(ST, name) for name in (
+        "dbt_get_positions_strict", "dbt_get_open_orders", "_evaluate_take_profit",
+        "_evaluate_hedge", "_evaluate_position_risk_now", "bnc_submit_hedge_order")}
+    ST.RUN_PROFILE = "TEST"
+    ST.HEDGE_VENUE = "BINANCE"
+    ST.ALLOW_HEDGE_TRADING = True
+    now = int(time.time() * 1000)
+    try:
+        fmz_shim._G(ST._POSITION_KEY, {
+            "position_id": "pos-test-dry-hedge-cleanup",
+            "side": "CALL",
+            "short_instrument": "BTC-S-76000-C",
+            "long_instrument": "BTC-S-78000-C",
+            "remaining_short_qty": 0.0,
+            "long_remaining_qty": 0.0,
+            "short_fill_amount": 0.1,
+            "long_fill_amount": 0.1,
+            "short_fill_price": 0.008,
+            "long_fill_price": 0.0035,
+            "short_expiry_ts": now + 48 * H,
+            "settlement_state": "SHORT_SETTLED",
+            "entry_risk_anchor": {"entry_price": SPOT, "entry_dte_hours": 48,
+                                  "entry_loss_boundary": 77000,
+                                  "entry_touch_probability": 0.10},
+        })
+        ST.ledger_set_state(ST.S_SHORT_FLAT_LONG_RESIDUAL)
+        ST.dbt_get_positions_strict = lambda *_a, **_k: []
+        ST.dbt_get_open_orders = lambda *_a: []
+        ST._evaluate_take_profit = lambda *_a, **_k: {
+            "qualified": False, "remaining_short_qty": 0.0, "remaining_budget": 0.0,
+            "price_cap": 0.0, "quote_ok": True, "ratio": None,
+            "target_ratio": 0.8, "status": "NO_SHORT",
+        }
+        ST._evaluate_hedge = lambda *_a, **_k: {
+            "perp_qty": -0.02, "target": 0.0, "orphan": True, "side": "buy",
+            "venue": "BINANCE", "instrument": "BTCUSDC", "net_option_delta": 0.0,
+            "delta_to_trade": 0.02,
+            "venue_cfg": {"venue": "BINANCE", "instrument": "BTCUSDC",
+                          "linear": True, "exchange_index": 1},
+            "action": {"action": "HEDGE_UNWIND", "reduce_only": True,
+                       "delta_contracts": 0.02},
+        }
+        ST._evaluate_position_risk_now = lambda *_a, **_k: {
+            "tail_risk_state": "NORMAL",
+            "current_risk": {"touch_probability_now": 0.20},
+            "reason_codes": ["TOUCH_PROBABILITY_NORMAL"],
+        }
+        calls = []
+        ST.bnc_submit_hedge_order = lambda **kw: calls.append(kw) or {
+            "order_id": "dry-hedge-cleanup", "filled": 0.0,
+            "dry": not kw.get("allow_live"), "reason": "BINANCE_HEDGE_DRYRUN"}
+
+        out = ST.manage_cycle(now)
+
+        assert calls and calls[0]["symbol"] == "BTCUSDC"
+        assert calls[0]["allow_live"] is False
+        assert out["hedge_step"]["dry"] is True
+    finally:
+        for name, value in orig.items():
+            setattr(ST, name, value)
+
+
+def test_run_cycle_position_snapshot_overrides_lost_no_position_state():
+    ST = _setup()
+    orig_manage_cycle = ST.manage_cycle
+    now = int(time.time() * 1000)
+    fmz_shim._G(ST._POSITION_KEY, {
+        "position_id": "pos-ledger-lost",
+        "side": "CALL",
+        "short_instrument": "BTC-S-76000-C",
+        "long_instrument": "BTC-S-78000-C",
+        "remaining_short_qty": 0.1,
+        "long_remaining_qty": 0.1,
+        "short_expiry_ts": now + 48 * H,
+        "entry_risk_anchor": {"entry_price": SPOT, "entry_dte_hours": 48,
+                              "entry_loss_boundary": 77000,
+                              "entry_touch_probability": 0.10},
+    })
+    ST.ledger_set_state(ST.S_NO_POSITION)
+    calls = []
+    try:
+        ST.manage_cycle = lambda ts: calls.append(ts) or {
+            "arb": {}, "entry_snapshot": fmz_shim._G(ST._POSITION_KEY),
+            "reconcile": {"reconciled": True}, "risk_state": "NORMAL",
+            "risk": {}, "exit_campaign_state": "TEST",
+            "tp_ratio": None, "position_detail": {}, "take_profit_detail": {},
+            "risk_exit_detail": {}, "hedge_detail": {}, "ledger_detail": {},
+        }
+
+        ctx = ST.run_cycle(now)
+
+        assert calls == [now]
+        assert ctx["console_phase"] == "POSITION_MANAGE"
+        assert ctx["entry_snapshot"]["position_id"] == "pos-ledger-lost"
+    finally:
+        ST.manage_cycle = orig_manage_cycle
+
+
 def test_take_profit_exit_uses_config_gate_without_runtime_authorization():
     ST = _setup()
     orig = {name: getattr(ST, name) for name in (

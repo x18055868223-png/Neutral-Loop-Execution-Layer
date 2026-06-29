@@ -59,6 +59,12 @@ def exec_round_order_price(side, price, meta, tick=None):
     return _round_to_tick(price, eff_tick, mode)
 
 
+def exec_round_taker_price(side, price, meta, tick=None):
+    eff_tick = exec_effective_tick(meta, price) or tick or 0.0
+    mode = "up" if side == "buy" else "down"
+    return _round_to_tick(price, eff_tick, mode)
+
+
 def exec_buy_price(mark, best_ask, tick, step, meta=None):
     """买 protection：step0=min(mark,ask-tick)；每追一步 +tick，封顶 ask-tick。"""
     cap = best_ask - tick
@@ -334,7 +340,7 @@ def _post_taker_once(side, instrument, amount, price, label, meta=None, quote=No
                                  0.0, None, None, quote, taker=True)
     intended_price = price
     meta = meta or dbt_get_instrument(instrument) or {}
-    price = exec_round_order_price(side, price, meta)
+    price = exec_round_taker_price(side, price, meta)
     resp = dbt_place_order(side, instrument, amount, price,
                            post_only=False, reject_post_only=False, label=label)
     order = _extract_order(resp)

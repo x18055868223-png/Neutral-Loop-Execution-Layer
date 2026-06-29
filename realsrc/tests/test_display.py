@@ -4,6 +4,49 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import display as D
 
 
+V32_POLICY_REASONS = (
+    "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT",
+    "SUBMIT_UNKNOWN_RECENT",
+    "PENDING_ACTIVE",
+    "PENDING_FILLED",
+    "PENDING_PARTIAL_ACTIVE",
+    "PENDING_STALE_RECOVERED",
+    "PENDING_STALE_CANCEL_FAILED",
+    "POSITION_READ_FAILED",
+    "TARGET_DATA_GAP",
+    "SOFT_TRIGGER_INITIAL",
+    "SOFT_TRIGGER_CONFIRMED",
+    "HARD_TRIGGER_EMERGENCY",
+    "CRASH_TRIGGER_SPEED",
+    "FINAL3H_SOFT_ADD_SUPPRESSED",
+    "ADD_COOLDOWN_ACTIVE",
+    "REDUCE_COOLDOWN_ACTIVE",
+    "REDUCE_MIN_HOLD_ACTIVE",
+    "REDUCE_HYSTERESIS_WAIT",
+    "REDUCE_CONFIRMED",
+    "REVERSE_HEDGE_UNWIND",
+    "ORPHAN_HEDGE_UNWIND",
+    "NO_TRIGGER",
+    "HOLD_EXISTING",
+    "LOT_DEADBAND",
+    "TARGET_BAND_DEADBAND",
+    "BINANCE_ORDER_ID_MISSING",
+)
+
+
+EXIT_CAMPAIGN_STATES = (
+    "IDLE",
+    "WAIT_TRIGGER",
+    "WORKING_SHORT",
+    "PAUSED_BY_BUDGET",
+    "PAUSED_BY_DATA",
+    "WORKING_LONG",
+    "LONG_RESIDUAL_ONLY",
+    "COMPLETE",
+    "HOLD_PROTECTION_UNTIL_SHORT_FLAT",
+)
+
+
 def _tables_from_panel(panel):
     # 面板格式： "header...#color\n`<json array>`"
     assert "`" in panel
@@ -38,6 +81,20 @@ def test_reason_and_state_maps():
     assert D.disp_reason_cn("EXIT_REVIEW_MANUAL:MANUAL_CONTEXT_INVALID").find("无效") >= 0
     assert D.disp_state_cn("SHORT_ACTIVE_PROTECTED") == "已保护·卖方持仓"
     assert D.disp_manual_gate_state_cn("PLANNING_ALLOWED").find("已开启") >= 0
+
+
+def test_v32_policy_reasons_are_chinese_mapped():
+    for reason in V32_POLICY_REASONS:
+        text = D.disp_reason_cn(reason)
+        assert text != reason, reason
+        assert reason not in text, reason
+
+
+def test_exit_campaign_states_are_chinese_mapped():
+    for state in EXIT_CAMPAIGN_STATES:
+        text = D.disp_exit_campaign_state_cn(state)
+        assert text != state, state
+        assert state not in text, state
 
 
 def test_panel_is_valid_fmz_tables():
@@ -433,10 +490,44 @@ def test_position_manage_surfaces_crash_reference_observability_only():
     hedge_rows = {r[0]: r[1:] for r in next(t for t in tables if t["title"] == "风险与对冲")["rows"]}
 
     assert "Crash观测" in hedge_rows
+    assert "CRASH_TRIGGER_SPEED" not in D.disp_status_panel(ctx, "测试")
+    assert "崩盘速度紧急触发" in D.disp_status_panel(ctx, "测试")
     assert "60000" in hedge_rows["Crash观测"][0]
     assert "300" in hedge_rows["Crash观测"][0]
     assert "116.7" in hedge_rows["Crash观测"][0]
     assert "只读观测" in hedge_rows["Crash观测"][1]
+
+
+def test_position_manage_marks_episode_cost_as_reserved_not_computed():
+    ctx = _ctx()
+    ctx.update(
+        console_phase="POSITION_MANAGE",
+        state="SHORT_ACTIVE_PROTECTED",
+        hedge_detail={
+            "venue": "BINANCE",
+            "instrument": "BTCUSDC",
+            "side": "sell",
+            "action_cn": "保持",
+            "hedge_policy": "V32",
+            "policy_state": "HARD",
+            "policy_reason": "HARD_TRIGGER",
+            "policy_cross_bps": 30,
+            "episode_cost_bps": 12.3,
+            "policy_warnings": ["EPISODE_COST_ALERT"],
+        },
+        take_profit_detail={"status": "未达标", "ratio": 0.2, "target_ratio": 0.8},
+        ledger_detail={"reconciled": True, "recovery_state": "OK", "active_orders": []},
+    )
+
+    tables = _tables_from_panel(D.disp_status_panel(ctx, "测试"))
+    hedge_rows = {r[0]: r[1:] for r in next(t for t in tables if t["title"] == "风险与对冲")["rows"]}
+    cost_text = " ".join(" ".join(str(x) for x in row)
+                         for key, row in hedge_rows.items()
+                         if key in ("控制器门控", "成本字段", "成本观测"))
+
+    assert "reserved_not_computed" in cost_text
+    assert "12.3" in cost_text
+    assert "cost_bps" not in cost_text
 
 
 def test_console_kill_hint_overrides():
@@ -466,6 +557,39 @@ def test_position_manage_hides_runtime_interaction_and_plan_empty_fields():
     for forbidden in ("授权码", "风险退出码", "点【授权", "点【风险退出", "点【拒绝】",
                       "点【急停】", "点【恢复】", "确认码", "待批", "候选展示", "预提交"):
         assert forbidden not in rendered
+
+
+def test_position_manage_exit_campaign_state_is_chinese_first():
+    ctx = _ctx()
+    ctx.update(
+        console_phase="POSITION_MANAGE",
+        state="SHORT_FLAT_LONG_RESIDUAL",
+        exit_campaign_state="WORKING_LONG",
+        position_detail={
+            "lifecycle": "短腿已归零·回收保护腿中",
+            "short_instrument": "BTC-29JUN26-60000-P",
+            "long_instrument": "BTC-29JUN26-57500-P",
+            "remaining_short_qty": 0.0,
+            "long_remaining_qty": 0.1,
+            "combo_unrealized_pnl_usd": None,
+            "pnl_data_gap": "数据缺口",
+        },
+        take_profit_detail={"status": "未达标", "ratio": 0.2, "target_ratio": 0.8},
+        hedge_detail={"action_cn": "保持", "touch_probability_now": 0.3},
+        ledger_detail={"reconciled": True, "recovery_state": "OK", "active_orders": []},
+    )
+
+    panel = D.disp_status_panel(ctx, "测试")
+
+    assert "WORKING_LONG" not in panel
+    assert "回收保护腿" in panel
+
+
+def test_long_recovery_hint_does_not_expose_raw_exit_state():
+    hint = D.disp_operation_hint({"console_phase": "LONG_RECOVERY"})
+
+    assert "LONG_RESIDUAL_ONLY" not in hint
+    assert "保护腿残留" in hint
 
 
 def test_console_manual_gate_hint():

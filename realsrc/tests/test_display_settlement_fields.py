@@ -13,6 +13,7 @@ def test_ledger_table_surfaces_settlement_and_final_pnl_fields():
         "ledger_detail": {
             "reconciled": True,
             "settlement_event_count": 2,
+            "settlement_state": "BOTH_LEGS_SETTLED",
             "settlement_pnl_status": "COMPUTED",
             "option_settlement_cashflow_ccy": -0.00002,
             "option_realized_pnl_status": "COMPUTED",
@@ -25,7 +26,13 @@ def test_ledger_table_surfaces_settlement_and_final_pnl_fields():
     })
 
     rows = {r[0]: r[1] for r in table["rows"]}
-    assert "COMPUTED" in rows["Settlement"]
-    assert "COMPUTED" in rows["Option realized PnL"]
-    assert "OPEN" in rows["Final option PnL"]
-    assert "0.00001 BTC" in rows["Protection recovery"]
+    assert "交割结算" in rows
+    assert "期权已实现PnL" in rows
+    assert "最终期权PnL" in rows
+    assert "保护腿回收" in rows
+    assert "已计算" in rows["交割结算"]
+    assert "已计算" in rows["期权已实现PnL"]
+    assert "仍在管理中" in rows["最终期权PnL"]
+    assert "0.00001 BTC" in rows["保护腿回收"]
+    assert "Settlement" not in rows
+    assert "status=" not in " ".join(rows.values())

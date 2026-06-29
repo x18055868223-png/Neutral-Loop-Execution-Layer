@@ -192,6 +192,20 @@ def _missing_methods(ex, names):
     return [name for name in names if not callable(getattr(ex, name, None))]
 
 
+def bnc_order_lifecycle_supported(symbol, idx=None):
+    ex = _ex(idx)
+    if ex is None:
+        return {"ok": False, "reason": "BINANCE_EXCHANGE_UNAVAILABLE",
+                "missing_methods": ["exchange"]}
+    missing = _missing_methods(
+        ex, ("SetContractType", "GetTicker", "SetDirection", "Buy", "Sell",
+             "GetOrder", "CancelOrder"))
+    return {"ok": not missing,
+            "reason": None if not missing else "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
+            "missing_methods": missing,
+            "symbol": symbol}
+
+
 def bnc_submit_hedge_order(symbol, side, amount, reduce_only, cross_bps=5,
                            allow_live=True, idx=None,
                            execution_style="PROMPT_LIMIT"):

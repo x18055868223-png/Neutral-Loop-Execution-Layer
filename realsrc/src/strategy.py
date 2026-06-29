@@ -37,7 +37,7 @@ from hedge import (hedge_target_contracts, hedge_target_position, hedge_order_ac
                   hedge_rebalance_deadband, hedge_target_ratio_for_soft)
 from binance_io import (bnc_get_position_btc, bnc_get_position_snapshot,
                         bnc_submit_hedge_order, bnc_get_hedge_order,
-                        bnc_cancel_hedge_order)
+                        bnc_cancel_hedge_order, bnc_order_lifecycle_supported)
 from deribit_io import *
 from leg_selection import *
 from spm_sim import *
@@ -504,7 +504,8 @@ def _position_event_log_summary(ctx, note):
             return "%s｜%s｜数据缺口:%s" % (note or "manual-gate", label, ctx.get(key))
     risk_detail = ctx.get("risk_exit_detail") or {}
     if risk_detail.get("risk_exit_active") and risk_detail.get("reason"):
-        return "%s｜风险退出受限｜原因=%s" % (note or "manual-gate", risk_detail.get("reason"))
+        return "%s｜风险退出受限｜原因=%s" % (
+            note or "manual-gate", disp_reason_cn(risk_detail.get("reason")))
     recovery_state = ctx.get("recovery_state")
     if recovery_state and recovery_state != "OK":
         return "%s｜恢复/对账异常｜%s" % (note or "manual-gate", recovery_state)
@@ -808,6 +809,11 @@ def _apply_manual_context_to_ctx(ctx, manual_context, manual_check):
 def _has_position(state):
     return state in (S_SHORT_ACTIVE_PROTECTED, S_PROTECTION_ACTIVE_NO_SHORT,
                      S_SHORT_FLAT_LONG_RESIDUAL)
+
+
+def _has_position_snapshot(snap):
+    return isinstance(snap, dict) and bool(
+        snap.get("position_id") or snap.get("short_instrument") or snap.get("long_instrument"))
 
 
 def _handle_execute(code, now_ms):
@@ -1230,6 +1236,7 @@ def _build_entry_risk_anchor(locked, spot, now_ms):
 def _entry_execution_report(prog):
     prog = prog or {}
     fills = list(prog.get("entry_fills") or [])
+    actual_fills = [f for f in fills if (f.get("filled") or 0.0) > 1e-12]
     total_fee = prog.get("entry_fee_used")
     if total_fee is None:
         total_fee = sum((f.get("fee_used") or f.get("fee_estimate") or 0.0) for f in fills)
@@ -1238,7 +1245,8 @@ def _entry_execution_report(prog):
     before_fee = short_credit - prot_cost
     return {
         "fills": fills,
-        "fill_count": len(fills),
+        "fill_count": len(actual_fills),
+        "order_event_count": len(fills),
         "total_fee_estimate": total_fee,
         "total_protection_cost": prot_cost,
         "total_short_credit": short_credit,
@@ -1836,11 +1844,15 @@ def _orphan_hedge_cleanup_detail(recovery):
             side = "sell"
         elif qty < -1e-12:
             side = "buy"
+    auto = recovery.get("auto_cleanup_allowed") is True
     return {
         "state": recovery.get("state") or "ORPHAN_HEDGE_EMERGENCY",
-        "policy": "MANUAL_CLEANUP_ONLY",
-        "mode": "MANUAL_REDUCE_ONLY_REQUIRED",
-        "auto_cleanup_allowed": False,
+        "policy": recovery.get("cleanup_policy") or (
+            "AUTO_REDUCE_ONLY" if auto else "MANUAL_CLEANUP_ONLY"),
+        "mode": recovery.get("cleanup_mode") or (
+            "AUTO_REDUCE_ONLY_ALLOWED" if auto else "MANUAL_REDUCE_ONLY_REQUIRED"),
+        "auto_cleanup_allowed": auto,
+        "cleanup_block_reason": recovery.get("cleanup_block_reason"),
         "venue": recovery.get("venue") or HEDGE_VENUE,
         "instrument": recovery.get("instrument") or (
             HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE" else HEDGE_INSTRUMENT),
@@ -1848,6 +1860,59 @@ def _orphan_hedge_cleanup_detail(recovery):
         "suggested_side": side,
         "reasons": recovery.get("reasons") or [],
     }
+
+
+def _startup_orphan_cleanup_decision(perp_qty, active_orders):
+    if HEDGE_VENUE != "BINANCE":
+        return {"auto_cleanup_allowed": False, "cleanup_policy": "MANUAL_CLEANUP_ONLY",
+                "cleanup_mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+                "cleanup_block_reason": "UNSUPPORTED_HEDGE_VENUE"}
+    if not isinstance(perp_qty, (int, float)) or isinstance(perp_qty, bool) \
+            or abs(perp_qty) <= 1e-9:
+        return {"auto_cleanup_allowed": False, "cleanup_policy": "MANUAL_CLEANUP_ONLY",
+                "cleanup_mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+                "cleanup_block_reason": "NO_PERP_POSITION"}
+    unknown = [o for o in (active_orders or []) if not (o or {}).get("label")]
+    if unknown:
+        return {"auto_cleanup_allowed": False, "cleanup_policy": "MANUAL_CLEANUP_ONLY",
+                "cleanup_mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+                "cleanup_block_reason": "UNKNOWN_ACTIVE_ORDERS"}
+    support = bnc_order_lifecycle_supported(HEDGE_BINANCE_INSTRUMENT)
+    if not support.get("ok"):
+        return {"auto_cleanup_allowed": False, "cleanup_policy": "MANUAL_CLEANUP_ONLY",
+                "cleanup_mode": "MANUAL_REDUCE_ONLY_REQUIRED",
+                "cleanup_block_reason": support.get("reason") or "BINANCE_ORDER_LIFECYCLE_UNSUPPORTED",
+                "missing_methods": support.get("missing_methods") or []}
+    return {"auto_cleanup_allowed": True,
+            "cleanup_policy": "AUTO_REDUCE_ONLY",
+            "cleanup_mode": "AUTO_REDUCE_ONLY_ALLOWED",
+            "cleanup_block_reason": None}
+
+
+def _submit_orphan_hedge_cleanup(detail, now_ms):
+    qty = detail.get("perp_qty")
+    side = detail.get("suggested_side")
+    if not side or not isinstance(qty, (int, float)) or isinstance(qty, bool):
+        return {"filled": 0.0, "dry": True, "venue": detail.get("venue"),
+                "reason": "ORPHAN_CLEANUP_NO_ACTION"}
+    st = _hedge_policy_load_state_raw() or {}
+    if st.get("pending_order_id"):
+        return {"filled": 0.0, "dry": False, "venue": detail.get("venue"),
+                "reason": "HEDGE_PENDING_ORDER_ACTIVE", "blocked": True,
+                "pending_order_id": st.get("pending_order_id")}
+    hedge = {
+        "venue": "BINANCE",
+        "instrument": detail.get("instrument") or HEDGE_BINANCE_INSTRUMENT,
+        "side": side,
+        "venue_cfg": {"venue": "BINANCE", "instrument": detail.get("instrument") or HEDGE_BINANCE_INSTRUMENT,
+                      "linear": True, "exchange_index": HEDGE_BINANCE_EXCHANGE_INDEX},
+        "action": {"action": "HEDGE_UNWIND", "reduce_only": True,
+                   "delta_contracts": abs(qty)},
+        "policy_detail": {"reason": "STARTUP_ORPHAN_AUTO_CLEANUP",
+                          "cross_bps": HEDGE_SOFT_CROSS_BPS},
+    }
+    allow_live = bool(normalize_run_profile(RUN_PROFILE) == "LIVE")
+    return _hedge_policy_submit(hedge, now_ms, allow_live=allow_live)
 
 
 def _clear_recovery_ok(reason, now_ms):
@@ -2013,10 +2078,24 @@ def startup_recovery_check(currency):
         return block
     verdict = evaluate_startup_recovery(opt, perp_qty, short_qty, active_orders=orders,
                                         expected_long_qty=long_qty)
+    unknown_order_block = (
+        verdict.get("state") == "RECOVERY_BLOCKED"
+        and any(str(r).startswith("UNKNOWN_ACTIVE_ORDERS") for r in (verdict.get("reasons") or []))
+        and (short_qty or 0.0) <= 1e-12
+        and (long_qty or 0.0) <= 1e-12
+        and isinstance(perp_qty, (int, float))
+        and not isinstance(perp_qty, bool)
+        and abs(perp_qty) > 1e-9
+    )
+    if unknown_order_block:
+        verdict = {"state": "ORPHAN_HEDGE_EMERGENCY",
+                   "reasons": verdict.get("reasons") or ["UNKNOWN_ACTIVE_ORDERS"],
+                   "allow_new_open": False}
     if verdict.get("state") == "ORPHAN_HEDGE_EMERGENCY":
         verdict.update({"perp_qty": perp_qty, "venue": HEDGE_VENUE,
                         "instrument": (HEDGE_BINANCE_INSTRUMENT if HEDGE_VENUE == "BINANCE"
                                        else HEDGE_INSTRUMENT)})
+        verdict.update(_startup_orphan_cleanup_decision(perp_qty, orders))
     _G(_RECOVERY_KEY, verdict)
     return verdict
 
@@ -3100,6 +3179,10 @@ def _position_lifecycle_cn(snap, exit_state=None, in_flight=None):
     long_rem = (snap or {}).get("long_remaining_qty")
     if long_rem is None:
         long_rem = (snap or {}).get("long_fill_amount") or 0.0
+    if (snap or {}).get("entry_completion_state") == "PARTIAL_VERTICAL":
+        return "开仓部分成交·部分垂直持仓"
+    if (snap or {}).get("entry_completion_state") == "PROTECTION_ONLY_RESIDUAL":
+        return "保护腿残留·未形成期权空头"
     if (in_flight or {}).get("count"):
         return "活动订单处理中"
     if exit_state in (EXIT_WORKING_SHORT, EXIT_PAUSED_BUDGET, EXIT_PAUSED_DATA):
@@ -3338,6 +3421,7 @@ def _build_ledger_detail(snap, rec, recovery, in_flight, tp):
         "protection_recovery_count": len(snap.get("protection_recovery_history") or []),
         "hedge_fill_count": len(snap.get("hedge_execution_history") or []),
         "settlement_event_count": len(snap.get("option_settlement_history") or []),
+        "settlement_state": snap.get("settlement_state"),
         "settlement_pnl_status": snap.get("settlement_pnl_status"),
         "short_settlement_cashflow_ccy": snap.get("short_settlement_cashflow_ccy"),
         "long_settlement_cashflow_ccy": snap.get("long_settlement_cashflow_ccy"),
@@ -3473,7 +3557,8 @@ def manage_cycle(now_ms):
             rem_short = (snap or {}).get("remaining_short_qty") or 0.0
     elif executable in ("HEDGE_READY", "ORPHAN_HEDGE_EMERGENCY") and hedge_exec:
         if _hedge_policy_enabled_for(hedge):
-            hedge_step = _hedge_policy_submit(hedge, now_ms, allow_live=True)
+            hedge_allow_live = bool(normalize_run_profile(RUN_PROFILE) == "LIVE")
+            hedge_step = _hedge_policy_submit(hedge, now_ms, allow_live=hedge_allow_live)
         else:
             hedge_step = {"filled": 0.0, "dry": False,
                           "venue": hedge.get("venue"),
@@ -3532,7 +3617,7 @@ def run_cycle(now_ms=None):
     gsum = _gate_summary_now()
     kill = _effective_kill()
     state = ledger_get_state()
-    has_pos = _has_position(state)
+    has_pos = _has_position(state) or _has_position_snapshot(_G(_POSITION_KEY))
     locked = _G(_LOCKED_KEY)
     spot = _spot_price()
     lineage_invalidation = _lineage_invalidated(locked, manual_context, now_ms)
@@ -3552,13 +3637,20 @@ def run_cycle(now_ms=None):
     plan_build_attempted = False
     commit_result = None
     manage_result = None
+    orphan_cleanup_detail = None
+    orphan_cleanup_step = None
     recovery = _recovery_verdict()
     rec_ok = recovery.get("allow_new_open", True)
 
     if recovery.get("state") == "RECOVERY_BLOCKED":
         phase = "RECOVERY_BLOCKED"
     elif recovery.get("state") == "ORPHAN_HEDGE_EMERGENCY" and not has_pos:
-        phase = "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED"
+        orphan_cleanup_detail = _orphan_hedge_cleanup_detail(recovery)
+        if orphan_cleanup_detail.get("auto_cleanup_allowed"):
+            orphan_cleanup_step = _submit_orphan_hedge_cleanup(orphan_cleanup_detail, now_ms)
+            phase = "ORPHAN_HEDGE_AUTO_CLEANUP"
+        else:
+            phase = "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED"
     elif has_pos:
         manage_result = manage_cycle(now_ms)
         phase = "POSITION_MANAGE"
@@ -3567,6 +3659,7 @@ def run_cycle(now_ms=None):
     elif locked:
         commit_result = _attempt_commit(locked, spot, manual_context, now_ms)
         phase = ("POSITION_MANAGE" if (commit_result["committed"]
+                 or commit_result.get("partial_position")
                  or commit_result.get("residual_position")) else "PLAN_LOCKED")
     elif not MANUAL_PLANNING_ALLOWED:
         phase = "WAIT_MANUAL_AUDIT_GATE"
@@ -3693,6 +3786,23 @@ def run_cycle(now_ms=None):
         ctx["entry_prot_order"] = po
         if commit_result.get("entry_snapshot"):
             ctx["entry_snapshot"] = commit_result["entry_snapshot"]
+            if phase == "POSITION_MANAGE" and not manage_result:
+                snap = commit_result["entry_snapshot"]
+                qfn = _quote_cache()
+                tp_display = _evaluate_take_profit(snap, qfn, now_ms)
+                no_in_flight = {"count": 0, "orders": []}
+                ctx["position_detail"] = _build_position_detail(
+                    snap, qfn, now_ms, None, no_in_flight, None)
+                ctx["take_profit_detail"] = tp_display
+                ctx["ledger_detail"] = _build_ledger_detail(
+                    snap,
+                    {"reconciled": None, "reasons": ["POST_ENTRY_MANAGE_NEXT_LOOP"]},
+                    recovery, no_in_flight, tp_display)
+    if locked and locked.get("entry") and not (commit_result and commit_result.get("committed")):
+        ctx["entry_progress"] = dict(locked.get("entry") or {})
+        ctx["entry_progress"]["target_amount"] = locked.get("amount") or ORDER_AMOUNT
+        ctx["entry_progress"]["short_instrument"] = locked.get("short_instrument")
+        ctx["entry_progress"]["long_instrument"] = locked.get("long_instrument")
     if manage_result:
         ctx["action_arb"] = manage_result.get("arb")
         ctx["entry_snapshot"] = manage_result.get("entry_snapshot")
@@ -3734,8 +3844,12 @@ def run_cycle(now_ms=None):
                    HEDGE_OPEN_EXECUTION_STYLE, _h["action"].get("reduce_only")))
     if recovery.get("state") != "OK":
         ctx["recovery_state"] = recovery.get("state")
-    if phase == "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED":
-        ctx["orphan_hedge_cleanup"] = _orphan_hedge_cleanup_detail(recovery)
+        ctx["recovery_reasons"] = recovery.get("reasons") or []
+        ctx["allow_new_open"] = recovery.get("allow_new_open", True)
+    if phase in ("ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED", "ORPHAN_HEDGE_AUTO_CLEANUP"):
+        ctx["orphan_hedge_cleanup"] = orphan_cleanup_detail or _orphan_hedge_cleanup_detail(recovery)
+        if orphan_cleanup_step:
+            ctx["orphan_hedge_cleanup_step"] = orphan_cleanup_step
     if locked and not (commit_result and commit_result.get("committed")):
         ctx["locked_plan_summary"] = "%s %s" % (locked.get("confirm_code"), locked.get("summary"))
         if not ctx.get("preview_plan_detail"):

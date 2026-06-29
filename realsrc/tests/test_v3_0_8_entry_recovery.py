@@ -349,11 +349,11 @@ def test_startup_recovery_rereads_positions_after_entry_order_cancel():
     open_orders = [[order], []]
     positions = [
         [],
-        [],
         [{"instrument_name": "BTC-29JUN26-60000-C", "size": -0.05}],
-        [],
     ]
     try:
+        ST.HEDGE_VENUE = "BINANCE"
+        ST.bnc_get_position_btc = lambda *_a: 0.0
         ST.dbt_get_open_orders = lambda *_a: open_orders.pop(0)
         ST.dbt_cancel = lambda _oid: True
         ST.dbt_get_positions_strict = lambda *_a: positions.pop(0)

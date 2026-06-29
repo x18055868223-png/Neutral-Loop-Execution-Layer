@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.28-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# Deribit S:PM 垂直信用价差卖方执行链 v3.2.21-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.28-manual-gate"
+STRATEGY_VERSION = "3.2.21-manual-gate"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -2204,46 +2204,6 @@ REASON_CN = {
     "EXIT_PRICE_ABOVE_CAP": "风险退出卖一高于预算上限",
     "EXIT_DEPTH_DATA_GAP": "风险退出卖一深度缺口",
     "EXIT_DEPTH_INSUFFICIENT": "风险退出卖一深度不足",
-    "HEDGE_POSITION_QUERY_FAILED": "Binance/对冲仓位读取失败，请人工核对",
-    "OPTION_POSITION_QUERY_FAILED": "Deribit 期权持仓读取失败，请人工核对",
-    "PENDING_ACTIVE": "对冲挂单未结束，等待成交/撤单回报",
-    "PENDING_FILLED": "对冲挂单已成交，已回写执行历史",
-    "PENDING_PARTIAL_ACTIVE": "对冲挂单部分成交，剩余挂单仍在等待",
-    "PENDING_STALE_RECOVERED": "对冲挂单已过期并完成恢复",
-    "PENDING_STALE_CANCEL_FAILED": "对冲挂单过期但撤单失败，请人工核对",
-    "SUBMIT_UNKNOWN_RECENT": "对冲提交结果不确定，暂不重复下单",
-    "BINANCE_ORDER_ID_MISSING": "Binance未返回订单ID，进入不确定提交保护",
-    "HEDGE_POLICY_DISABLED_NO_LEGACY_SUBMIT": "对冲策略已停用，不走旧下单路径",
-    "POSITION_READ_FAILED": "Binance仓位读取失败：禁新增对冲，仅保守持仓",
-    "TARGET_DATA_GAP": "对冲目标缺口：暂不调整",
-    "SOFT_TRIGGER_INITIAL": "SOFT触发：先按分段比例小幅加对冲",
-    "SOFT_TRIGGER_CONFIRMED": "SOFT确认：按全目标对冲",
-    "HARD_TRIGGER_EMERGENCY": "HARD紧急触发：按全目标对冲",
-    "CRASH_TRIGGER_SPEED": "崩盘速度紧急触发：按全目标对冲",
-    "FINAL3H_SOFT_ADD_SUPPRESSED": "临近到期：SOFT新增对冲暂停",
-    "ADD_COOLDOWN_ACTIVE": "新增对冲冷却中，暂不加仓",
-    "REDUCE_COOLDOWN_ACTIVE": "减对冲冷却中，暂不减仓",
-    "REDUCE_MIN_HOLD_ACTIVE": "对冲最短持有期内，暂不减仓",
-    "REDUCE_HYSTERESIS_WAIT": "风险回落滞回确认中，暂不减仓",
-    "REDUCE_CONFIRMED": "风险回落确认：只减对冲",
-    "REVERSE_HEDGE_UNWIND": "对冲方向反转：先归零再反向",
-    "ORPHAN_HEDGE_UNWIND": "期权短腿风险已消失：只减清理孤儿对冲",
-    "NO_TRIGGER": "无触发：当前无需对冲",
-    "HOLD_EXISTING": "维持现有对冲，无需调整",
-    "LOT_DEADBAND": "差额低于最小手数，暂不调整",
-    "TARGET_BAND_DEADBAND": "目标带内死区，暂不调整",
-}
-
-EXIT_CAMPAIGN_STATE_CN = {
-    "IDLE": "退出空闲",
-    "WAIT_TRIGGER": "等待止盈/风险触发",
-    "WORKING_SHORT": "买回短腿中",
-    "PAUSED_BY_BUDGET": "退出预算暂停",
-    "PAUSED_BY_DATA": "退出数据缺口暂停",
-    "WORKING_LONG": "回收保护腿中",
-    "LONG_RESIDUAL_ONLY": "保护腿残留，仅等待/结算",
-    "COMPLETE": "退出活动完成",
-    "HOLD_PROTECTION_UNTIL_SHORT_FLAT": "等待短腿归零后回收保护腿",
 }
 
 _C_GREEN = "#16a34a"
@@ -2289,12 +2249,6 @@ def disp_reason_cn(reason):
     if reason.startswith("PLAN_MENU_READY"):
         return REASON_CN["PLAN_MENU_READY"] + reason[len("PLAN_MENU_READY"):]
     return reason
-
-
-def disp_exit_campaign_state_cn(state):
-    if not state:
-        return "空闲"
-    return EXIT_CAMPAIGN_STATE_CN.get(state, state)
 
 
 def _num(x, small=8, big=4):
@@ -2701,10 +2655,9 @@ def _hedge_summary_cn(ctx):
             return "数据缺口：%s｜禁新增对冲/仅保守持仓" % h.get("data_gap")
         reduce_only = "reduce_only=%s" % ("是" if h.get("reduce_only") else "否")
         if h.get("hedge_policy"):
-            policy_reason = disp_reason_cn(h.get("policy_reason")) if h.get("policy_reason") else "—"
             return "%s｜%s｜full %s eff %s 当前 %s delta %s｜pending %s" % (
                 h.get("policy_state") or "HOLD",
-                policy_reason,
+                h.get("policy_reason") or "—",
                 _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
                 _num(h.get("current_hedge_qty")), _num(h.get("policy_delta_to_trade")),
                 h.get("pending_order_id") or "—")
@@ -2718,21 +2671,10 @@ def _hedge_summary_cn(ctx):
 
 def _ledger_summary_cn(ctx):
     ld = ctx.get("ledger_detail") or {}
-    def reasons_cn(reasons):
-        out = []
-        for reason in reasons or []:
-            cn = disp_reason_cn(reason)
-            out.append("%s（%s）" % (cn, reason) if cn != reason else str(reason))
-        return "；".join(out) or "—"
-
     if not ld:
         rec = ctx.get("reconciled")
-        recovery = ctx.get("recovery_state") or "OK"
-        rec_reasons = reasons_cn(ctx.get("recovery_reasons"))
-        if recovery != "OK" and rec_reasons != "—":
-            recovery = "%s/%s" % (recovery, rec_reasons)
         return "状态 %s｜恢复 %s｜对账 %s" % (
-            disp_state_cn(ctx.get("state")), recovery,
+            disp_state_cn(ctx.get("state")), ctx.get("recovery_state") or "OK",
             "已对齐" if rec is True else ("不一致" if rec is False else "—"))
     rec = ld.get("reconciled")
     rec_line = "已对齐" if rec is True else ("不一致" if rec is False else "数据缺口")
@@ -2751,8 +2693,7 @@ def _position_manage_overview_table(ctx):
     hedge_line = _usd_signed_value(hedge_pnl) if isinstance(hedge_pnl, (int, float)) else (hedge_state or "数据缺口")
     pnl_gap = pd.get("pnl_data_gap") or "未扣除已发生手续费/已用退出支出"
     return {"type": "table", "title": "持仓总览", "cols": ["项目", "值", "备注"], "rows": [
-        ["生命周期", pd.get("lifecycle") or disp_state_cn(ctx.get("state")),
-         disp_exit_campaign_state_cn(ctx.get("exit_campaign_state"))],
+        ["生命周期", pd.get("lifecycle") or disp_state_cn(ctx.get("state")), ctx.get("exit_campaign_state") or "—"],
         ["短腿合约", pd.get("short_instrument") or "数据缺口", "剩余 %s" % _qty_line(pd.get("remaining_short_qty"))],
         ["保护腿合约", pd.get("long_instrument") or "数据缺口", "剩余 %s" % _qty_line(pd.get("long_remaining_qty"))],
         ["入场均价(短/保护)", "%s / %s" % (_num(pd.get("short_fill_price")), _num(pd.get("long_fill_price"))), "冻结成交均价"],
@@ -2839,14 +2780,13 @@ def _risk_hedge_table(ctx):
     policy_rows = []
     if h.get("hedge_policy"):
         pending = h.get("pending_order_id") or "—"
-        policy_reason = disp_reason_cn(h.get("policy_reason")) if h.get("policy_reason") else "—"
         cooldown = "add_until %s ｜ reduce_until %s" % (
             _num(h.get("add_cooldown_until"), small=0, big=0),
             _num(h.get("reduce_cooldown_until"), small=0, big=0))
         warnings = ",".join(h.get("policy_warnings") or []) or "—"
         policy_rows = [
             ["对冲控制器", "state=%s ｜ reason=%s ｜ pending=%s" % (
-                h.get("policy_state") or "—", policy_reason, pending),
+                h.get("policy_state") or "—", h.get("policy_reason") or "—", pending),
              "V32 gamma-aware reconciliation，读交易所仓位为真"],
             ["控制器目标", "full %s ｜ eff %s ｜ current %s ｜ delta %s" % (
                 _num(h.get("full_target_qty")), _num(h.get("eff_target_qty")),
@@ -2922,33 +2862,6 @@ def _ledger_recovery_table(ctx):
 
 _ledger_recovery_table_base = _ledger_recovery_table
 
-SETTLEMENT_STATE_CN = {
-    "NONE": "未结算",
-    "SHORT_SETTLED": "短腿已交割",
-    "LONG_SETTLED": "保护腿已交割",
-    "BOTH_LEGS_SETTLED": "双腿已交割",
-    "SETTLED": "已交割",
-}
-
-PNL_STATUS_CN = {
-    "COMPUTED": "已计算",
-    "ESTIMATED": "估算",
-    "DATA_GAP": "数据缺口",
-    "NOT_COMPUTED": "未计算",
-    "OPEN": "仍在管理中",
-    "NONE": "未计算",
-}
-
-
-def _settlement_state_cn(value):
-    raw = str(value or "NONE")
-    return "%s(%s)" % (SETTLEMENT_STATE_CN.get(raw, raw), raw)
-
-
-def _pnl_status_cn(value):
-    raw = str(value or "NONE")
-    return "%s(%s)" % (PNL_STATUS_CN.get(raw, raw), raw)
-
 
 def _ledger_recovery_table(ctx):
     table = _ledger_recovery_table_base(ctx)
@@ -2956,26 +2869,25 @@ def _ledger_recovery_table(ctx):
     spot = (ctx or {}).get("spot")
     rows = table.get("rows") or []
     extra_rows = [
-        ["交割结算", "%s ｜ %s ｜ 事件%s ｜ 净现金流 %s" % (
-            _settlement_state_cn(ld.get("settlement_state")),
-            _pnl_status_cn(ld.get("settlement_pnl_status")),
+        ["Settlement", "status=%s events=%s net=%s" % (
+            ld.get("settlement_pnl_status") or "NONE",
             ld.get("settlement_event_count") or 0,
             _btc_usd_gap(ld.get("option_settlement_cashflow_ccy"), spot)),
-         "短腿 %s / 保护腿 %s" % (
+         "short %s / long %s" % (
              _btc_usd_gap(ld.get("short_settlement_cashflow_ccy"), spot),
              _btc_usd_gap(ld.get("long_settlement_cashflow_ccy"), spot))],
-        ["保护腿回收", "净回收 %s / 费用 %s" % (
+        ["Protection recovery", "net %s / fees %s" % (
             _btc_usd_gap(ld.get("realized_protection_recovery_value"), spot),
             _btc_usd_gap(ld.get("realized_protection_recovery_fees"), spot)),
-         "计入期权已实现PnL"],
-        ["期权已实现PnL", "%s ｜ %s" % (
-            _pnl_status_cn(ld.get("option_realized_pnl_status") or "DATA_GAP"),
+         "included in option realized PnL"],
+        ["Option realized PnL", "status=%s value=%s" % (
+            ld.get("option_realized_pnl_status") or "DATA_GAP",
             _btc_usd_gap(ld.get("option_realized_pnl_ccy"), spot)),
-         "入场净credit - 退出支出 + 保护腿回收 + 交割现金流"],
-        ["最终期权PnL", "%s ｜ %s" % (
-            _pnl_status_cn(ld.get("final_pnl_status") or "OPEN"),
+         "entry credit - exits + protection recovery + settlement"],
+        ["Final option PnL", "status=%s value=%s" % (
+            ld.get("final_pnl_status") or "OPEN",
             _btc_usd_gap(ld.get("final_option_pnl_ccy"), spot)),
-         "仅在双腿已关闭/交割后成为最终值"],
+         "only final when both option legs are closed"],
     ]
     insert_at = 4 if len(rows) >= 4 else len(rows)
     table["rows"] = rows[:insert_at] + extra_rows + rows[insert_at:]
@@ -3024,7 +2936,7 @@ _HINTS = {
     "PLAN_LOCKED": "方案已锁定·预提交复核中；复核通过且进场门开启才真实下单",
     "POSITION_MANAGE": "无需交互，按配置门控自动管理；运行时只阅读状态栏",
     "EXIT_CAMPAIGN": "退出活动中：逐 tick 买回短腿、不破止盈预算；预算内无法成交则暂停后重试",
-    "LONG_RECOVERY": "短腿已归零·回收保护腿中；无 bid 时标记为保护腿残留，售出/结算后归档",
+    "LONG_RECOVERY": "短腿已归零·回收保护腿中；无 bid 记 LONG_RESIDUAL_ONLY，售出/结算后归档",
     "RECOVERY_BLOCKED": "启动恢复阻塞：账本与交易所持仓无法解释映射；禁开新仓，请人工核对",
     "ORPHAN_HEDGE_AUTO_CLEANUP": "已确认无期权短腿风险，正在自动提交 Binance 只减清理；无需输入运行时命令",
     "ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED": "孤儿对冲需要人工核对并手动只减清理；禁新开仓",
@@ -3178,8 +3090,7 @@ def disp_pipeline_table(ctx):
                 g("commit_reason") or "未触发",
                 g("entry_state") or "—",
                 (g("manage_in_flight_order") or {}).get("count") or 0)],
-            ["退出模块", "%s ｜ %s" % (
-                disp_exit_campaign_state_cn(g("exit_campaign_state")), _take_profit_summary_cn(ctx))],
+            ["退出模块", "%s ｜ %s" % (g("exit_campaign_state") or "空闲", _take_profit_summary_cn(ctx))],
             ["对冲模块", _hedge_summary_cn(ctx)],
             ["记账/对账", _ledger_summary_cn(ctx)],
             ["恢复模块", g("recovery_state") or (ctx.get("ledger_detail") or {}).get("recovery_state") or "OK"],
@@ -3208,7 +3119,7 @@ def disp_pipeline_table(ctx):
         ["记账/恢复", _ledger_summary_cn(ctx)],
         ["对冲模块", _hedge_summary_cn(ctx)],
         ["退出模块", "%s ｜ %s" % (
-            disp_exit_campaign_state_cn(g("exit_campaign_state")), _take_profit_summary_cn(ctx),
+            g("exit_campaign_state") or "空闲", _take_profit_summary_cn(ctx),
         )],
     ]
     entry_progress_line = disp_entry_progress_line(g("entry_progress"))
@@ -3294,7 +3205,7 @@ def disp_console_table(ctx):
     elif g("take_profit_ratio") is not None:
         rows.append(["止盈资格", g("take_profit_ratio")])
     if g("exit_campaign_state"):
-        rows.append(["退出活动", disp_exit_campaign_state_cn(g("exit_campaign_state"))])
+        rows.append(["退出活动", g("exit_campaign_state")])
     if position_mode and g("hedge_detail"):
         rows.append(["对冲", _hedge_summary_cn(ctx)])
     elif g("hedge_state"):
@@ -8943,7 +8854,6 @@ def _build_ledger_detail(snap, rec, recovery, in_flight, tp):
         "protection_recovery_count": len(snap.get("protection_recovery_history") or []),
         "hedge_fill_count": len(snap.get("hedge_execution_history") or []),
         "settlement_event_count": len(snap.get("option_settlement_history") or []),
-        "settlement_state": snap.get("settlement_state"),
         "settlement_pnl_status": snap.get("settlement_pnl_status"),
         "short_settlement_cashflow_ccy": snap.get("short_settlement_cashflow_ccy"),
         "long_settlement_cashflow_ccy": snap.get("long_settlement_cashflow_ccy"),
@@ -9366,8 +9276,6 @@ def run_cycle(now_ms=None):
                    HEDGE_OPEN_EXECUTION_STYLE, _h["action"].get("reduce_only")))
     if recovery.get("state") != "OK":
         ctx["recovery_state"] = recovery.get("state")
-        ctx["recovery_reasons"] = recovery.get("reasons") or []
-        ctx["allow_new_open"] = recovery.get("allow_new_open", True)
     if phase in ("ORPHAN_HEDGE_MANUAL_CLEANUP_REQUIRED", "ORPHAN_HEDGE_AUTO_CLEANUP"):
         ctx["orphan_hedge_cleanup"] = orphan_cleanup_detail or _orphan_hedge_cleanup_detail(recovery)
         if orphan_cleanup_step:
