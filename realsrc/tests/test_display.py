@@ -246,6 +246,20 @@ def test_console_surfaces_entry_protection_persistent_order():
     assert "taker兜底区" in rows["保护腿挂单"]
 
 
+def test_entry_protection_order_line_surfaces_fallback_budget():
+    line = D.disp_entry_prot_order_line({
+        "order_id": "p1",
+        "price": 0.0002,
+        "wait_elapsed_ms": 61000,
+        "wait_limit_ms": 60000,
+        "wait_remaining_ms": 0,
+        "taker_due": True,
+    })
+    assert "61s" in line
+    assert "60s" in line
+    assert "0s" in line
+
+
 def test_overview_uses_split_action_gates_not_single_allow_trading():
     ctx = _ctx()
     ctx.update(gate_summary={"ENTRY": {"allowed": False}, "EXIT": {"allowed": True},

@@ -946,11 +946,17 @@ def disp_entry_prot_order_line(order):
         return None
     elapsed = order.get("wait_elapsed_ms")
     elapsed_s = ("%ss" % int(elapsed / 1000)) if isinstance(elapsed, (int, float)) else "—"
+    limit = order.get("wait_limit_ms")
+    limit_s = ("%ss" % int(limit / 1000)) if isinstance(limit, (int, float)) else "—"
+    remaining = order.get("wait_remaining_ms")
+    remaining_s = ("%ss" % max(0, int(remaining / 1000))) if isinstance(remaining, (int, float)) else "—"
     mode = "taker兜底区" if order.get("taker_due") else "maker等待"
-    return "id=%s ｜ 价=%s ｜ 已等=%s ｜ %s" % (
+    return "id=%s ｜ 价=%s ｜ 已等=%s ｜ 阈值=%s ｜ 剩余=%s ｜ %s" % (
         order.get("order_id") or "—",
         _num(order.get("price")),
         elapsed_s,
+        limit_s,
+        remaining_s,
         mode,
     )
 

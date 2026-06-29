@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===
-# Deribit S:PM 垂直信用价差卖方执行链 v3.2.28-manual-gate（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）
+# === Auto-generated artifact; edit realsrc/src then rerun build_bundle.py ===
+# Deribit S:PM vertical credit spread execution layer v1 (FMZ single file)
 
 
 # ===================== module: config =====================
@@ -15,7 +15,7 @@ Human Audit Gate 执行层配置块（FMZ 启动前手填）。
 
 # ===== 当前版本 / 实例标识 =====
 ROBOT_ID = "spm-exec-1"            # 命令幂等键的一部分；多机器人并行时必须各自唯一
-STRATEGY_VERSION = "3.2.28-manual-gate"
+STRATEGY_VERSION = "v1"
 SETTLEMENT_RECONCILE_GRACE_MS = 5 * 60 * 1000
 RUN_PROFILE = "LIVE"              # TEST=强制所有真实交易门关闭；LIVE=按 ALLOW_* 门控执行
 
@@ -56,8 +56,8 @@ CHASE_WAIT_SECONDS = 8             # 挂单后判定未成交的等待秒数
 ENTRY_MIN_NET_CREDIT = 0.0         # 入场净 credit 下限；0=至少非负
 ENTRY_MAX_TICK_STEPS = 3           # 开仓活动在信用底线内最多逐 tick 改价档数
 ENTRY_MAX_ATTEMPTS = 20            # 开仓活动软计数上限；无成交不清锁，保护腿改由时间上限触发 taker
-ENTRY_PROTECTION_TAKER_AFTER_SECONDS = 600 # 保护腿 maker 持续等待上限；超过后受控吃卖一
-ENTRY_SHORT_ORDER_WAIT_SECONDS = 60        # 卖方腿 maker 挂单存续；实盘观察后延长等待
+ENTRY_PROTECTION_TAKER_AFTER_SECONDS = 60  # 保护腿 maker 持续等待上限；超过后受控吃卖一
+ENTRY_SHORT_ORDER_WAIT_SECONDS = 15        # 卖方腿 maker 挂单存续；真实盘口适配默认短等待
 
 # ===== 分动作真实交易授权门控 =====
 ALLOW_ENTRY_TRADING = True         # 新开垂直价差（新增风险）
@@ -3101,11 +3101,17 @@ def disp_entry_prot_order_line(order):
         return None
     elapsed = order.get("wait_elapsed_ms")
     elapsed_s = ("%ss" % int(elapsed / 1000)) if isinstance(elapsed, (int, float)) else "—"
+    limit = order.get("wait_limit_ms")
+    limit_s = ("%ss" % int(limit / 1000)) if isinstance(limit, (int, float)) else "—"
+    remaining = order.get("wait_remaining_ms")
+    remaining_s = ("%ss" % max(0, int(remaining / 1000))) if isinstance(remaining, (int, float)) else "—"
     mode = "taker兜底区" if order.get("taker_due") else "maker等待"
-    return "id=%s ｜ 价=%s ｜ 已等=%s ｜ %s" % (
+    return "id=%s ｜ 价=%s ｜ 已等=%s ｜ 阈值=%s ｜ 剩余=%s ｜ %s" % (
         order.get("order_id") or "—",
         _num(order.get("price")),
         elapsed_s,
+        limit_s,
+        remaining_s,
         mode,
     )
 
@@ -4092,6 +4098,7 @@ def _protection_order_record(order, instrument, amount, price, now_ms, wait_star
         "filled_seen": _entry_filled_amount(order),
         "placed_ms": now_ms,
         "wait_start_ms": wait_start_ms,
+        "wait_limit_ms": ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000,
         "label": label,
     }
 
@@ -9302,9 +9309,12 @@ def run_cycle(now_ms=None):
         if po:
             po = dict(po)
             ws = po.get("wait_start_ms")
+            wait_limit_ms = ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
+            po["wait_limit_ms"] = wait_limit_ms
             if isinstance(ws, (int, float)):
                 po["wait_elapsed_ms"] = max(0, now_ms - ws)
-                po["taker_due"] = po["wait_elapsed_ms"] >= ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
+                po["wait_remaining_ms"] = max(0, wait_limit_ms - po["wait_elapsed_ms"])
+                po["taker_due"] = po["wait_elapsed_ms"] >= wait_limit_ms
         ctx["entry_prot_order"] = po
         if commit_result.get("entry_snapshot"):
             ctx["entry_snapshot"] = commit_result["entry_snapshot"]

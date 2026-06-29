@@ -3,6 +3,7 @@
 ## Release
 
 - Version: `3.2.28-manual-gate`
+- Release class: test-round archive, superseded by formal `v1`.
 - Source: `realsrc/src/`
 - Bundle source: `realsrc/spm_manual_gate_execution_fmz.py`
 - Versioned archive: `artifacts/spm_manual_gate_execution_fmz_v3_2_28.py`
@@ -65,6 +66,7 @@ behavior without closing a demonstrated route to live orders.
 
 - No open local P0/P1 is currently identified after the Opus follow-up fixes.
 - No open cleanup candidate is currently identified from the Opus feedback.
-- FMZ live acceptance remains pending and must use the exact v3.2.28 artifact,
-  saved FMZ logs, and exchange state snapshots. Local green tests are still not
-  FMZ live proof.
+- This artifact is now classified as a test-round archive. Formal live
+  validation should use the v1 latest-delivery artifact instead, with saved FMZ
+  logs and exchange state snapshots. Local green tests are still not FMZ live
+  proof.

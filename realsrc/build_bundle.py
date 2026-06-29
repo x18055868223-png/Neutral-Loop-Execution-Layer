@@ -69,9 +69,10 @@ def _read_version():
 
 
 def build():
+    version = _read_version()
     parts = ["# -*- coding: utf-8 -*-",
-             "# === 自动合成产物：请勿手改，改 src/ 后重新 build_bundle.py ===",
-             "# Deribit S:PM 垂直信用价差卖方执行链 v%s（FMZ 单文件；单一 run_cycle 主链 + 交互控制台 + 对冲生命周期）" % _read_version(),
+             "# === Auto-generated artifact; edit realsrc/src then rerun build_bundle.py ===",
+             "# Deribit S:PM vertical credit spread execution layer %s (FMZ single file)" % version,
              ""]
     for mod in MODULE_ORDER:
         path = os.path.join(SRC, mod + ".py")
@@ -108,7 +109,7 @@ def check(src):
                "validate_manual_context", "manual_context_hash",
                "build_entry_risk_anchor", "evaluate_position_risk",
                "integrated_plan_preview",
-               # v3 主链 / 交互 / 退出 / 对冲（须全部在单文件命名空间内解析）
+               # v1 正式主链 / 交互 / 退出 / 对冲（须全部在单文件命名空间内解析）
                "run_cycle", "manage_cycle", "route_command",
                "build_recommendation_library", "resolve_confirm_code", "evaluate_precommit_checks",
                "build_vertical_entry_snapshot", "evaluate_projected_budget",
@@ -121,11 +122,11 @@ def check(src):
     for bad in ("plan_kpf_score", "_kpf_buffer_adverse", "entry_kpf_buffer_state",
                 "KPF_CONTESTED_CORE"):
         assert bad not in src, "bundle 残留 KPF：%s" % bad
-    # 未残留日历运行路径（v3 垂直唯一）
+    # 未残留日历运行路径（v1 垂直唯一）
     for bad in ("MODE_CALENDAR", "ENABLE_CALENDAR", "PROTECTION_RESIDUAL_RECOVERY",
                 "CALENDAR_PROTECTED_SHORT"):
         assert bad not in src, "bundle 残留日历：%s" % bad
-    print("[check] 名称解析 smoke 通过；main() + v3 主链/交互/退出/对冲齐全；无 KPF / 无日历残留")
+    print("[check] 名称解析 smoke 通过；main() + v1 正式主链/交互/退出/对冲齐全；无 KPF / 无日历残留")
 
 
 if __name__ == "__main__":

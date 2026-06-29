@@ -421,6 +421,7 @@ def _protection_order_record(order, instrument, amount, price, now_ms, wait_star
         "filled_seen": _entry_filled_amount(order),
         "placed_ms": now_ms,
         "wait_start_ms": wait_start_ms,
+        "wait_limit_ms": ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000,
         "label": label,
     }
 

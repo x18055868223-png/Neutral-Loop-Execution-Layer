@@ -544,6 +544,47 @@ def test_entry_protection_reprices_on_one_tick_mark_move_without_resetting_wait(
     _restore_ex()
 
 
+def test_entry_protection_default_v1_fallback_takes_after_sixty_seconds():
+    quotes = {
+        "P": {"mark_price": 0.0002, "best_bid_price": 0.0001,
+              "best_ask_price": 0.0009, "greeks": {"delta": 0.05}},
+        "S": {"mark_price": 0.0068, "best_bid_price": 0.0067,
+              "best_ask_price": 0.0070, "greeks": {"delta": 0.3}},
+    }
+    calls, cancels = [], []
+    EX.dbt_ticker = lambda inst: quotes[inst]
+    EX.dbt_get_instrument = lambda inst: {"tick_size": 0.0001}
+    EX.dbt_order_book = lambda inst, depth=1: {"asks": [[0.0009, 0.1]]}
+    EX.dbt_place_order = lambda side, inst, amt, price, **kwargs: (
+        calls.append((side, inst, amt, price, kwargs))
+        or {"order": {"order_id": "t1", "order_state": "open", "filled_amount": 0.0}}
+    )
+    EX.dbt_get_order_state = lambda oid: (
+        {"order": {"order_id": oid, "order_state": "filled",
+                   "filled_amount": 0.1, "average_price": 0.0009}}
+        if oid == "t1" else
+        {"order": {"order_id": oid, "order_state": "open", "filled_amount": 0.0}}
+    )
+    EX.dbt_cancel = lambda oid: cancels.append(oid) or {"order_id": oid}
+    EX.Sleep = lambda ms: None
+    prot_order = {"order_id": "p1", "instrument": "P", "price": 0.0002,
+                  "amount": 0.1, "filled_seen": 0.0, "placed_ms": 1000,
+                  "wait_start_ms": 1000, "label": "entry_prot"}
+
+    r = EX.exec_entry_campaign_step(
+        "P", "S", 0.1, credit_floor=0.0, max_tick_steps=3,
+        attempt=2, prot_done_qty=0.0, short_done_qty=0.0,
+        allow_live=True, label="entry", prot_order=prot_order, now_ms=62000)
+
+    assert EX.ENTRY_PROTECTION_TAKER_AFTER_SECONDS == 60
+    assert cancels == ["p1"]
+    assert calls[0][0:4] == ("buy", "P", 0.1, 0.0009)
+    assert calls[0][4]["post_only"] is False
+    assert r["prot_fill"] == 0.1
+    assert r["prot_order"] is None
+    _restore_ex()
+
+
 def test_entry_protection_after_ten_minutes_takes_ask_when_depth_and_credit_pass():
     quotes = {
         "P": {"mark_price": 0.0002, "best_bid_price": 0.0001,

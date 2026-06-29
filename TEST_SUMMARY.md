@@ -5,9 +5,9 @@ local evidence only, not FMZ live proof.
 
 ## Current Version
 
-- Version: `3.2.28-manual-gate`
+- Version: `v1`
 - Latest delivery after build:
-  `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`
+  `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`
 - Boundary: local tests and bundle checks only; not FMZ live proof.
 
 ## Final Local Verdict
@@ -22,16 +22,20 @@ artifact. FMZ live acceptance still requires deploying this exact artifact and
 verifying FMZ command wiring, startup/read-only status, exchange state, and
 first-cycle logs.
 
+v1 adds the real-fill adaptation from the public-data audit: protection maker
+fallback now triggers after 60 seconds when depth and net credit pass, short-leg
+maker wait is 15 seconds, and LogStatus surfaces the protection fallback budget.
+
 ## Latest Full Local Verification
 
-The latest complete local suite at v3.2.28 passed with:
+The latest complete local suite at v1 passed with:
 
 - `C:\Users\Xu\AppData\Local\Programs\Python\Python312\python.exe realsrc\tests\run_all.py`
-  -> `401 passed, 0 failed`
+  -> `403 passed, 0 failed`
 - `C:\Users\Xu\AppData\Local\Programs\Python\Python312\python.exe realsrc\build_bundle.py --check`
   -> generated `realsrc\spm_manual_gate_execution_fmz.py` and passed syntax
   compile plus bundle smoke checks.
-- `C:\Users\Xu\AppData\Local\Programs\Python\Python312\python.exe -m py_compile artifacts\最新交付\spm_manual_gate_execution_fmz_v3_2_28.py`
+- `C:\Users\Xu\AppData\Local\Programs\Python\Python312\python.exe -m py_compile artifacts\最新交付\spm_manual_gate_execution_fmz_v1.py`
   -> passed
 
 Targeted verification after the latest matrix expansion:
@@ -41,8 +45,8 @@ Targeted verification after the latest matrix expansion:
 - `C:\Users\Xu\AppData\Local\Programs\Python\Python312\python.exe realsrc\build_bundle.py --check`
   -> generated `realsrc\spm_manual_gate_execution_fmz.py` and passed syntax
   compile plus bundle smoke checks.
-- SHA256 for the v3.2.28 generated/source/latest delivery bundle:
-  `A29EA7AB388AEF2B154BE850A9B4774E3FEFF7FDDFA34327F79FF0939BE308B6`
+- SHA256 for the v1 generated/source/latest delivery bundle:
+  `D41E00A122023455FD75E60F2C2A29B7F23B368CCE5C60364674D6EF45ED57FC`
 
 ## Lifecycle Matrix Rows
 

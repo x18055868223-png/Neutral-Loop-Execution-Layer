@@ -7,11 +7,15 @@ This repository contains the current independent execution-layer deliverable onl
 ## Current Artifact
 
 - FMZ artifact: `artifacts/spm_manual_gate_execution_fmz.py`
-- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`
+- Latest FMZ delivery: `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`
 - Editable source: `realsrc/src/`
 - Source bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Version: `STRATEGY_VERSION = "3.2.28-manual-gate"`
+- Version: `STRATEGY_VERSION = "v1"`
 - Status: live-test defaults with manual confirm-code gate
+- Release class: formal live-validation v1. All generated `v3*` bundles are
+  test-round archives, not the current sealed live-validation artifact.
+- Version classification: `artifacts/VERSION_CLASSIFICATION.md`
+- Formal seal audit: `doc/FORMAL_V1_SEAL_AUDIT.md`
 - v3.0.14 fixes Binance BTCUSDC perpetual selection by switching FMZ to
   `BTC_USDC` and `swap` before hedge position reads/orders.
 - v3.0.15 keeps the full status panel, deduplicates repeated Log lines, adds a

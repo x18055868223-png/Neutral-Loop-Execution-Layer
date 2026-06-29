@@ -1,17 +1,17 @@
 # Lifecycle Map
 
-Current source line mapped from `realsrc/src/` after the v3.2.28 Opus follow-up
-audit patch.
+Current source line mapped from `realsrc/src/` after the v1 real-fill
+adaptation patch.
 This document is evidence inventory, not FMZ live proof.
 
 ## Current Version
 
-- `STRATEGY_VERSION`: `3.2.28-manual-gate`
+- `STRATEGY_VERSION`: `v1`
 - Main orchestrator: `strategy.run_cycle(now_ms=None)`
 - FMZ loop entry: `strategy.main()`
 - Editable source: `realsrc/src/`
 - Generated bundle: `realsrc/spm_manual_gate_execution_fmz.py`
-- Latest local delivery after build: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`
+- Latest local delivery after build: `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`
 
 ## Persisted Keys
 

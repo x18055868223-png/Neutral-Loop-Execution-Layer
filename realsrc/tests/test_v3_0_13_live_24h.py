@@ -14,12 +14,14 @@ SPOT = 60000.0
 
 
 def test_default_config_is_live_ready_without_legacy_operator_fields():
-    assert C.STRATEGY_VERSION == "3.2.28-manual-gate"
+    assert C.STRATEGY_VERSION == "v1"
     assert C.RUN_PROFILE == "LIVE"
     assert C.DRY_RUN_PASSED is True
     assert C.ALLOW_ENTRY_TRADING is True
     assert C.ALLOW_EXIT_TRADING is True
     assert C.ALLOW_HEDGE_TRADING is True
+    assert C.ENTRY_PROTECTION_TAKER_AFTER_SECONDS == 60
+    assert C.ENTRY_SHORT_ORDER_WAIT_SECONDS == 15
     assert C.RISK_EXIT_MAX_SPEND > 0
     assert C.validate_config() == []
     for name in (

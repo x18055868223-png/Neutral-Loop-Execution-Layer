@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-- Audited artifact: `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`
-- Strategy version: `3.2.28-manual-gate`
-- SHA256: `A29EA7AB388AEF2B154BE850A9B4774E3FEFF7FDDFA34327F79FF0939BE308B6`
+- Audited artifact: `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`
+- Strategy version: `v1`
+- SHA256: `D41E00A122023455FD75E60F2C2A29B7F23B368CCE5C60364674D6EF45ED57FC`
 - Scope: FMZ Deribit S:PM manual-gate vertical credit spread execution layer,
   including manual decision intake, plan display, confirmation-code lock,
   precommit, protected entry, position management, TP/risk-exit, V32 Binance
@@ -30,15 +30,20 @@ operational/runtime risk outside the local deterministic harness: FMZ
 environment behavior, live exchange latency, real order lifecycle edge cases,
 and operator deployment/configuration mistakes.
 
+The v1 live-validation alignment keeps the v3.2.28 safety skeleton and narrows
+only the real-fill entry parameters: protection maker fallback is now 60 seconds
+instead of 600 seconds, short-leg maker wait is now 15 seconds, and the operator
+status line shows fallback elapsed/threshold/remaining state.
+
 ## Evidence Baseline
 
 | Evidence | Result |
 |---|---|
-| `realsrc/tests/run_all.py` | `401 passed, 0 failed` |
+| `realsrc/tests/run_all.py` | `403 passed, 0 failed` |
 | lifecycle matrix + live-default version tests | `47 passed, 0 failed` |
 | `realsrc/build_bundle.py --check` | syntax compile and bundle smoke passed |
 | latest delivery `py_compile` | passed |
-| `artifacts/最新交付/` | exactly one current file: `spm_manual_gate_execution_fmz_v3_2_28.py` |
+| `artifacts/最新交付/` | exactly one current file: `spm_manual_gate_execution_fmz_v1.py` |
 | bundle hash sync | source/generated/generic/versioned/latest all share the same SHA256 |
 
 These are local verification artifacts only.
@@ -126,7 +131,7 @@ exit, hedge, and protection-recovery loops do not double count.
 
 ## Operator Runbook
 
-1. Deploy only `artifacts/最新交付/spm_manual_gate_execution_fmz_v3_2_28.py`.
+1. Deploy only `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`.
 2. In FMZ, configure `GetCommand()` command name as `执行` with type `string`.
 3. Confirm the editable live-test block before start:
    `RUN_PROFILE`, `DIRECTION_BIAS`, `ORDER_AMOUNT`, `RISK_EXIT_MAX_SPEND`,

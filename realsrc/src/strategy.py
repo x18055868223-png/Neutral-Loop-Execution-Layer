@@ -3780,9 +3780,12 @@ def run_cycle(now_ms=None):
         if po:
             po = dict(po)
             ws = po.get("wait_start_ms")
+            wait_limit_ms = ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
+            po["wait_limit_ms"] = wait_limit_ms
             if isinstance(ws, (int, float)):
                 po["wait_elapsed_ms"] = max(0, now_ms - ws)
-                po["taker_due"] = po["wait_elapsed_ms"] >= ENTRY_PROTECTION_TAKER_AFTER_SECONDS * 1000
+                po["wait_remaining_ms"] = max(0, wait_limit_ms - po["wait_elapsed_ms"])
+                po["taker_due"] = po["wait_elapsed_ms"] >= wait_limit_ms
         ctx["entry_prot_order"] = po
         if commit_result.get("entry_snapshot"):
             ctx["entry_snapshot"] = commit_result["entry_snapshot"]

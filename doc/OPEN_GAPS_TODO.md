@@ -6,12 +6,25 @@ until the code, tests, bundle, and delivery notes prove it is closed.
 
 ## Current Baseline
 
-- Current target line: `3.2.x-manual-gate`
-- Latest completed release: `3.2.28-manual-gate`
+- Current target line: `v1`
+- Latest completed release: `v1`
 - Delivery rule: every small version must keep a versioned backup under
   `artifacts/`, refresh `artifacts/spm_manual_gate_execution_fmz.py`, and keep
   `artifacts/最新交付/` to exactly one current versioned FMZ file.
 - Boundary rule: local tests and bundle checks are not FMZ live proof.
+
+## Closed In v1
+
+- [x] Formal live-validation version label: `STRATEGY_VERSION = "v1"`.
+- [x] Real-fill entry alignment from the Deribit/Binance public-data audit:
+  protection leg keeps mark-derived persistent maker first, then allows the
+  controlled taker fallback after 60 seconds when ask depth and net-credit floor
+  still pass.
+- [x] Short leg remains blocked until protection fill coverage exists, then uses
+  mark-derived maker pricing with a 15-second wait by default.
+- [x] `LogStatus` now surfaces protection-leg wait budget: elapsed time,
+  fallback threshold, remaining time, and maker/taker-fallback state.
+- [x] Delivery evidence refreshed for `artifacts/最新交付/spm_manual_gate_execution_fmz_v1.py`.
 
 ## Closed In v3.2.1
 
